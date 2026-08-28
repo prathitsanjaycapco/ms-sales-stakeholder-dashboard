@@ -1,0 +1,8 @@
+backend/stakeholder-dev.db
+backend/stakeholder-dev.db-journal
+__pycache__/
+*.py[cod]
+.env
+backend/uploads/*
+dist/
+node_modules/
