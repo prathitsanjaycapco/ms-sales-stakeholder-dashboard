@@ -4,6 +4,7 @@ Revision ID: 0004_reference_integrity
 Revises: 0003_remove_legacy_snapshot
 """
 from alembic import op
+from sqlalchemy import inspect
 
 
 revision = "0004_reference_integrity"
@@ -29,14 +30,19 @@ FOREIGN_KEYS = [
 
 
 def upgrade() -> None:
-    if op.get_bind().dialect.name != "postgresql":
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
         return
     for name, source, target, local, remote in FOREIGN_KEYS:
-        op.create_foreign_key(name, source, target, local, remote, ondelete="RESTRICT")
+        existing = {item.get("name") for item in inspect(bind).get_foreign_keys(source)}
+        if name not in existing:
+            op.create_foreign_key(name, source, target, local, remote, ondelete="RESTRICT")
 
 
 def downgrade() -> None:
-    if op.get_bind().dialect.name != "postgresql":
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
         return
     for name, source, *_ in reversed(FOREIGN_KEYS):
-        op.drop_constraint(name, source, type_="foreignkey")
+        if name in {item.get("name") for item in inspect(bind).get_foreign_keys(source)}:
+            op.drop_constraint(name, source, type_="foreignkey")

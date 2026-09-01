@@ -4,6 +4,7 @@ Revision ID: 0002_cross_domain_integrity
 Revises: 0001_canonical_account_model
 """
 from alembic import op
+from sqlalchemy import inspect
 
 
 revision = "0002_cross_domain_integrity"
@@ -46,20 +47,34 @@ FOREIGN_KEYS = [
 
 
 def upgrade() -> None:
-    if op.get_bind().dialect.name != "postgresql":
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
         return
     for name, source, target, local, remote in FOREIGN_KEYS:
-        op.create_foreign_key(name, source, target, local, remote, ondelete="RESTRICT")
-    op.create_index("idx_pod_events_stakeholder_date", "pod_events", ["stakeholder_id", "start_at"])
-    op.create_index("idx_pod_events_source_meeting", "pod_events", ["source_meeting_id"], unique=True)
-    op.create_index("idx_critical_engagement_status", "pod_critical_items", ["engagement_id", "status"])
+        existing = {item.get("name") for item in inspect(bind).get_foreign_keys(source)}
+        if name not in existing:
+            op.create_foreign_key(name, source, target, local, remote, ondelete="RESTRICT")
+    for name, table, columns, unique in (
+        ("idx_pod_events_stakeholder_date", "pod_events", ["stakeholder_id", "start_at"], False),
+        ("idx_pod_events_source_meeting", "pod_events", ["source_meeting_id"], True),
+        ("idx_critical_engagement_status", "pod_critical_items", ["engagement_id", "status"], False),
+    ):
+        existing = {item.get("name") for item in inspect(bind).get_indexes(table)}
+        if name not in existing:
+            op.create_index(name, table, columns, unique=unique)
 
 
 def downgrade() -> None:
-    if op.get_bind().dialect.name != "postgresql":
+    bind = op.get_bind()
+    if bind.dialect.name != "postgresql":
         return
-    op.drop_index("idx_critical_engagement_status", table_name="pod_critical_items")
-    op.drop_index("idx_pod_events_source_meeting", table_name="pod_events")
-    op.drop_index("idx_pod_events_stakeholder_date", table_name="pod_events")
+    for name, table in (
+        ("idx_critical_engagement_status", "pod_critical_items"),
+        ("idx_pod_events_source_meeting", "pod_events"),
+        ("idx_pod_events_stakeholder_date", "pod_events"),
+    ):
+        if name in {item.get("name") for item in inspect(bind).get_indexes(table)}:
+            op.drop_index(name, table_name=table)
     for name, source, *_ in reversed(FOREIGN_KEYS):
-        op.drop_constraint(name, source, type_="foreignkey")
+        if name in {item.get("name") for item in inspect(bind).get_foreign_keys(source)}:
+            op.drop_constraint(name, source, type_="foreignkey")
