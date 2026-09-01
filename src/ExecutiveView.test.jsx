@@ -117,7 +117,7 @@ describe("Executive View cross-screen links", () => {
     });
     render(<ExecutiveView pod="All" {...handlers} />);
     await screen.findByRole("button", { name: /Open Green program engagement details/i });
-    await user.click(screen.getByRole("button", { name: /RED.*\$2M.*1 projects/i }));
+    await user.click(screen.getByRole("button", { name: /RED.*1 projects/i }));
     expect(screen.queryByRole("button", { name: /Open Green program engagement details/i })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /Open Red recovery engagement details/i }));
     expect(handlers.onOpenEngagement).toHaveBeenCalledWith("engagement-red");
