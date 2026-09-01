@@ -48,13 +48,34 @@ jobs:
       - run: python -m alembic upgrade head
       - run: python -m backend.manage seed-demo
       - run: npx playwright install --with-deps chromium
-      - run: npm run test:ci
+      - run: npm run test:unit
+      - run: npm run build
+      - run: npm run test:backend
+      - run: npm run test:e2e
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-results
+          name: functional-playwright-results
           path: |
             test-results
             playwright-report
-            .playwright
+          retention-days: 7
+
+  visual:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm run test:visual
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-playwright-results
+          path: .playwright
           retention-days: 7
