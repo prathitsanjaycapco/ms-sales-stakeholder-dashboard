@@ -285,6 +285,22 @@ audit_events = Table(
 )
 Index("idx_audit_entity_time", audit_events.c.entity_type, audit_events.c.entity_id, audit_events.c.occurred_at)
 
+idempotency_records = Table(
+    "idempotency_records", metadata,
+    Column("id", String(180), primary_key=True),
+    Column("actor_subject", String(240), nullable=False),
+    Column("idempotency_key", String(180), nullable=False),
+    Column("method", String(12), nullable=False),
+    Column("path", String(500), nullable=False),
+    Column("request_hash", String(64), nullable=False),
+    Column("response_status", Integer, nullable=False),
+    Column("response_body", JSON, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    UniqueConstraint("actor_subject", "idempotency_key", name="uq_idempotency_actor_key"),
+)
+Index("idx_idempotency_expiry", idempotency_records.c.expires_at)
+
 
 # The account assistant keeps retrieval artifacts beside the canonical account
 # data.  Document chunks reference the governed document row instead of

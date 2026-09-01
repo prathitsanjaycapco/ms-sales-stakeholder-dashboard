@@ -1,6 +1,10 @@
-const shortDate = (value, emptyValue) => value
-  ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value))
-  : emptyValue;
+import { formatBackendDate } from "./dateUtils";
+
+const shortDate = (value, emptyValue) => formatBackendDate(
+  value,
+  { month: "short", day: "numeric", year: "numeric" },
+  emptyValue,
+);
 
 export function adaptBackendStakeholder(record) {
   return {

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Bot, ChevronRight, Clock3, ExternalLink, MessageCircle, Plus, Send, ShieldCheck, Sparkles, Trash2, X } from "lucide-react";
 import { api } from "./api";
+import { useDialogAccessibility } from "./useDialogAccessibility";
 
 const suggestions = [
   "Summarize the account’s current performance",
@@ -27,6 +28,9 @@ export default function AccountAssistant({ context, onNavigate }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const bodyRef = useRef(null);
+  const launcherRef = useRef(null);
+  const dialogRef = useRef(null);
+  useDialogAccessibility(dialogRef, () => setOpen(false), open);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -45,13 +49,6 @@ export default function AccountAssistant({ context, onNavigate }) {
   useEffect(() => {
     if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
   }, [messages, loading]);
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const close = (event) => event.key === "Escape" && setOpen(false);
-    window.addEventListener("keydown", close);
-    return () => window.removeEventListener("keydown", close);
-  }, [open]);
 
   const newConversation = () => {
     setConversationId(null);
@@ -108,14 +105,14 @@ export default function AccountAssistant({ context, onNavigate }) {
   };
 
   return <>
-    <button className={`assistant-launcher ${open ? "active" : ""}`} onClick={() => setOpen(!open)} aria-label="Ask the Morgan Stanley account assistant" title="Ask account AI">
+    <button ref={launcherRef} className={`assistant-launcher ${open ? "active" : ""}`} onClick={() => setOpen(!open)} aria-label="Ask the Morgan Stanley account assistant" title="Ask account AI">
       {open ? <X /> : <MessageCircle />}<span>Ask account AI</span>
     </button>
-    {open && <aside className="account-assistant" role="dialog" aria-label="Morgan Stanley account assistant">
+    {open && <aside ref={dialogRef} className="account-assistant" role="dialog" aria-modal="true" aria-label="Morgan Stanley account assistant">
       <header>
         <div className="assistant-mark"><Sparkles /></div>
         <div><span>CAPCO ACCOUNT INTELLIGENCE</span><h2>Ask Morgan Stanley AI</h2></div>
-        <button onClick={newConversation} title="New conversation" aria-label="New conversation"><Plus /></button>
+        <button data-dialog-initial-focus onClick={newConversation} title="New conversation" aria-label="New conversation"><Plus /></button>
         <button onClick={() => setOpen(false)} title="Close assistant" aria-label="Close assistant"><X /></button>
       </header>
       <div className="assistant-context"><ShieldCheck /><span>Grounded in approved account records</span><em>{context.pod || "All"} · {context.section || "Account"}</em></div>
@@ -138,7 +135,7 @@ export default function AccountAssistant({ context, onNavigate }) {
           {!!message.citations?.length && <details><summary>{message.citations.length} account source{message.citations.length === 1 ? "" : "s"}</summary><div>{message.citations.map((citation) => <Citation key={citation.id} citation={citation} onNavigate={onNavigate} />)}</div></details>}
         </article>)}
         {loading && <article className="assistant-message assistant thinking"><div className="assistant-message-label"><Sparkles /> Account AI</div><p><i /><i /><i /> Retrieving account evidence…</p></article>}
-        {error && <div className="assistant-error">{error}<button onClick={() => setError("")}>Dismiss</button></div>}
+        {error && <div className="assistant-error" role="alert">{error}<button onClick={() => setError("")}>Dismiss</button></div>}
       </div>
       <form className="assistant-composer" onSubmit={(event) => { event.preventDefault(); send(); }}>
         <textarea autoFocus rows="2" value={value} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }} placeholder="Ask about stakeholders, meetings, pipeline, delivery, workforce, or documents…" />

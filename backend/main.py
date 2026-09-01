@@ -2,13 +2,15 @@ from pathlib import Path
 from typing import Optional
 from datetime import date, datetime, timezone
 from uuid import uuid4
+import atexit
 import logging
+from time import perf_counter
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
 
@@ -42,6 +44,16 @@ from .models import (
     AssistantChatRequest,
     AssistantChatResponse,
     AssistantConversation,
+    ResourceRequirementCreate,
+    ResourceRequirementUpdate,
+    CandidateCreate,
+    CandidateUpdate,
+    CandidateInterviewCreate,
+    CandidateInterviewUpdate,
+    OfferCreate,
+    OfferUpdate,
+    OnboardingRecordUpdate,
+    OnboardingStepUpdate,
 )
 from .repository import (
     ConflictError,
@@ -54,9 +66,10 @@ from .pod_store import PodOperatingStore
 from .executive_store import ExecutiveAnalyticsStore, engagements, employees
 from .config import settings
 from .integrity import reconcile_account
-from .governance import READ_ROLES, principal_from_request, record_audit_event
+from .governance import READ_ROLES, execute_idempotent, principal_from_request, record_audit_event
 from .identity_service import IdentityService
 from .rag_service import AccountAssistantService
+from .resourcing_store import ResourcingStore
 
 
 repository = create_repository()
@@ -65,20 +78,24 @@ pod_engine = getattr(repository, "engine", None) or create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+atexit.register(pod_engine.dispose)
 executive_store = ExecutiveAnalyticsStore(
     pod_engine, repository, None,
-    seed_demo_data=settings.seed_demo_data,
+    seed_demo_data=False,
     auto_create_schema=settings.auto_create_schema,
 )
 pod_store = PodOperatingStore(
     pod_engine, repository,
-    seed_demo_data=settings.seed_demo_data,
+    seed_demo_data=False,
     auto_create_schema=settings.auto_create_schema,
 )
 executive_store.pod_store = pod_store
-executive_store.reconcile_operating_links()
-if hasattr(repository, "reconcile_external_identities"):
-    repository.reconcile_external_identities()
+resourcing_store = ResourcingStore(
+    pod_engine, repository,
+    seed_demo_data=False,
+    auto_create_schema=settings.auto_create_schema,
+)
+executive_store.resourcing_store = resourcing_store
 identity_service = IdentityService(pod_engine)
 assistant_service = AccountAssistantService(pod_engine, repository, pod_store, executive_store, settings)
 
@@ -109,16 +126,31 @@ app.add_middleware(
 
 @app.middleware("http")
 async def identity_permissions_and_audit(request: Request, call_next):
+    started_at = perf_counter()
     request.state.request_id = request.headers.get("x-request-id") or f"request-{uuid4().hex}"
-    if request.url.path == "/api/health":
+    if request.url.path in {"/api/health", "/api/health/live", "/api/health/ready"}:
         response = await call_next(request)
     else:
         principal = principal_from_request(request, settings)
         if principal is None:
             return JSONResponse(status_code=401, content={"detail": "Authenticated identity is required"})
         request.state.principal = principal
+        if principal.invalid_roles:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "One or more application roles are not recognized", "code": "UNKNOWN_ROLE"},
+            )
         if not principal.roles:
             return JSONResponse(status_code=403, content={"detail": "No application role is assigned"})
+        if "morgan-stanley" not in principal.account_ids:
+            return JSONResponse(status_code=403, content={"detail": "Account access is not assigned", "code": "ACCOUNT_SCOPE_REQUIRED"})
+        path_parts = [part for part in request.url.path.split("/") if part]
+        path_pod = path_parts[path_parts.index("pods") + 1] if "pods" in path_parts and path_parts.index("pods") + 1 < len(path_parts) else None
+        requested_pod = path_pod or request.query_params.get("pod")
+        if not principal.can_access_pod(requested_pod):
+            return JSONResponse(status_code=403, content={"detail": "Pod access is not assigned", "code": "POD_SCOPE_REQUIRED"})
+        if hasattr(repository, "refresh_if_stale"):
+            repository.refresh_if_stale()
         personal_assistant_action = (
             request.method == "POST" and request.url.path == "/api/assistant/chat"
         ) or (
@@ -128,11 +160,27 @@ async def identity_permissions_and_audit(request: Request, call_next):
             return JSONResponse(status_code=403, content={"detail": "This operation requires an Editor, Account Manager, or Account Admin role"})
         response = await call_next(request)
         if request.method not in {"GET", "HEAD", "OPTIONS"} and response.status_code < 400:
-            audit_id = record_audit_event(pod_engine, principal, request, response.status_code)
-            response.headers["X-Audit-Event-ID"] = audit_id
+            try:
+                audit_id = record_audit_event(pod_engine, principal, request, response.status_code)
+                response.headers["X-Audit-Event-ID"] = audit_id
+            except Exception as audit_error:
+                # The business response has already been committed. Never tell a
+                # caller that the command failed and encourage an unsafe retry.
+                logger.critical(
+                    "Audit persistence failed request_id=%s method=%s path=%s error=%s",
+                    request.state.request_id, request.method, request.url.path, type(audit_error).__name__,
+                )
     response.headers["X-Request-ID"] = request.state.request_id
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
+    response.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src 'self'"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["X-Frame-Options"] = "DENY"
+    logger.info(
+        "request_complete request_id=%s method=%s path=%s status=%s duration_ms=%.1f",
+        request.state.request_id, request.method, request.url.path, response.status_code,
+        (perf_counter() - started_at) * 1000,
+    )
     return response
 
 
@@ -189,6 +237,28 @@ def health():
         "repository": getattr(repository, "backend_name", "memory"),
         "persistent": getattr(repository, "backend_name", "").startswith("normalized-sql"),
     }
+
+
+@app.get("/api/health/live")
+def health_live():
+    return {"status": "ok", "service": "stakeholder-intelligence-api", "version": app.version}
+
+
+@app.get("/api/health/ready")
+def health_ready():
+    checks = {"database": False, "schema_version": None, "storage": False}
+    try:
+        with pod_engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            checks["database"] = True
+            if inspect(connection).has_table("alembic_version"):
+                checks["schema_version"] = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+        checks["storage"] = UPLOAD_ROOT.is_dir() and UPLOAD_ROOT.exists()
+    except Exception as error:
+        logger.error("Readiness check failed (%s)", type(error).__name__)
+    ready = checks["database"] and checks["storage"]
+    payload = {"status": "ready" if ready else "not_ready", "checks": checks, "version": app.version}
+    return JSONResponse(status_code=200 if ready else 503, content=payload)
 
 
 @app.get("/api/health/details")
@@ -310,6 +380,14 @@ def integrity_reconciliation(anchor: Optional[date] = None):
     return reconcile_account(repository, pod_store, executive_store, anchor)
 
 
+@app.get("/api/data-trust")
+def data_trust(request: Request):
+    """User-facing provenance and freshness evidence for governed data domains."""
+    if not request.state.principal.roles.intersection(READ_ROLES):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account read access is required")
+    return identity_service.data_trust_summary()
+
+
 @app.get("/api/pods")
 def pods():
     return [
@@ -325,7 +403,7 @@ def pods():
 
 
 @app.get("/api/search")
-def global_search(q: str = Query(min_length=2, max_length=120), pod: Optional[str] = None, limit: int = Query(default=8, ge=1, le=20)):
+def global_search(request: Request, q: str = Query(min_length=2, max_length=120), pod: Optional[str] = None, limit: int = Query(default=8, ge=1, le=20)):
     """Grouped search over canonical people, organization, activity, and portfolio records."""
     if pod and pod != "All" and pod not in POD_STRUCTURE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pod not found")
@@ -338,6 +416,16 @@ def global_search(q: str = Query(min_length=2, max_length=120), pod: Optional[st
     with executive_store.engine.connect() as connection:
         project_rows = [dict(item) for item in connection.execute(select(engagements)).mappings() if (not pod or pod == "All" or item["pod_id"] == pod) and needle in f"{item['name']} {item['business_unit']} {item['division']}".casefold()][:limit]
         employee_rows = [dict(item) for item in connection.execute(select(employees)).mappings() if needle in f"{item['name']} {item['role']} {item['location']}".casefold()][:limit]
+    requirement_rows = [
+        item for item in resourcing_store.list_requirements(None if pod == "All" else pod)
+        if needle in f"{item['title']} {item['role']} {item['business_unit']} {item['project_name']}".casefold()
+    ][:limit]
+    candidate_rows = []
+    if request.state.principal.roles.intersection({"Account Manager", "Partner", "Account Admin"}):
+        candidate_rows = [
+            item for item in resourcing_store.list_candidates(None if pod == "All" else pod)
+            if needle in f"{item['name']} {item['role']} {item['business_unit']} {item['stage']}".casefold()
+        ][:limit]
 
     def person_for(ids):
         return next((repository.stakeholders[value] for value in ids if value in repository.stakeholders), None)
@@ -350,6 +438,8 @@ def global_search(q: str = Query(min_length=2, max_length=120), pod: Optional[st
             "Opportunities": [{"type": "opportunity", "id": item.id, "label": item.name, "context": f"{item.stage} · ${item.estimated_value:,.0f}", "pod": person_for(item.stakeholder_ids).pod if person_for(item.stakeholder_ids) else None} for item in opportunity_rows],
             "Engagements": [{"type": "engagement", "id": item["id"], "label": item["name"], "context": f"{item['business_unit']} · {item['health']}", "pod": item["pod_id"]} for item in project_rows],
             "Capco employees": [{"type": "employee", "id": item["id"], "label": item["name"], "context": f"{item['role']} · {item['location']}", "pod": None} for item in employee_rows],
+            "Resource requirements": [{"type": "resource_requirement", "id": item["id"], "label": item["title"], "context": f"{item['role']} / {item['project_name']}", "pod": item["pod_id"]} for item in requirement_rows],
+            "Candidates": [{"type": "candidate", "id": item["id"], "label": item["name"], "context": f"{item['role']} / {item['stage']}", "pod": item["pod_id"]} for item in candidate_rows],
         },
     }
 
@@ -372,6 +462,23 @@ def pod_dashboard(
     """Consolidated cockpit payload read from normalized SQL operating tables."""
     try:
         view_model = pod_store.dashboard(pod, period, period_start, tag)
+        staffing = resourcing_store.overview(pod)
+        view_model["resourcing"] = staffing["metrics"]
+        view_model["resourcingSummary"] = {
+            "criticalItems": staffing["critical_items"],
+            "startingSoon": staffing["starting_soon"],
+            "openDemand": staffing["open_demand"],
+        }
+        view_model["criticalItems"].extend([{
+            "id": f"resourcing-{item['type'].lower()}-{item['id']}", "pod": pod,
+            "severity": "RED" if item["type"] == "ONBOARDING" else "AMBER",
+            "type": f"STAFFING_{item['type']}", "title": item["headline"],
+            "description": item.get("detail") or "Resourcing attention required",
+            "owner": "Account staffing team", "capcoOwner": "Account staffing team",
+            "status": "Open", "tags": ["Resourcing", "Staffing"], "sourceId": item["id"],
+        } for item in staffing["critical_items"]])
+        view_model["health"] = pod_store._computed_health(view_model, date.today())
+        view_model["summary"] = pod_store._summary(view_model, date.today())
         return {
             "pod": pod,
             "period": period,
@@ -385,20 +492,6 @@ def pod_dashboard(
                 "pipeline": sum(item["value"] for item in view_model["opportunities"]),
                 "weighted_pipeline": sum(item["value"] * item["probability"] / 100 for item in view_model["opportunities"]),
             },
-            "calendar_events": [{
-                "id": item["id"],
-                "type": item["type"].upper(),
-                "title": item["title"],
-                "start_datetime": item["start"],
-                "all_day": False,
-                "stakeholder_ids": item["stakeholderIds"],
-                "meeting_id": item["meetingId"],
-            } for item in view_model["meetings"]],
-            "opportunities": view_model["opportunities"],
-            "critical_items": view_model["criticalItems"],
-            "tasks": view_model["tasks"],
-            "milestones": view_model["milestones"],
-            "leadership_focus": view_model["focus"],
             "view_model": view_model,
         }
     except Exception as error:
@@ -415,7 +508,9 @@ def executive_overview(
 ):
     """One connected, period-aware account command-center payload."""
     try:
-        return executive_store.overview(period, anchor, start_date, end_date, pod)
+        payload = executive_store.overview(period, anchor, start_date, end_date, pod)
+        payload["resourcing"] = resourcing_store.overview(pod)["metrics"]
+        return payload
     except Exception as error:
         raise translate_domain_error(error) from error
 
@@ -428,7 +523,216 @@ def executive_weekly(
 ):
     """Week-first operating view across Capco people, account activity and management actions."""
     try:
-        return executive_store.weekly(week_start, pod, outlook_weeks)
+        payload = executive_store.weekly(week_start, pod, outlook_weeks)
+        payload["resourcing"] = resourcing_store.overview(pod)["metrics"]
+        return payload
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.get("/api/notifications/digest")
+def notification_digest(pod: Optional[str] = None):
+    """A stable alert feed for the in-app center and approved delivery adapters."""
+    try:
+        weekly = executive_store.weekly(None, pod, 4)
+        resourcing = resourcing_store.overview(pod)
+        items = []
+        for item in weekly.get("attentionItems", []):
+            items.append({
+                "id": f"executive:{item['id']}", "category": "Leadership", "severity": item.get("severity", "AMBER"),
+                "title": item.get("title"), "context": item.get("context") or item.get("nextAction"),
+                "pod": item.get("pod"), "owner": item.get("owner"),
+                "route": {
+                    "type": "engagement" if item.get("engagementId") else "opportunity" if item.get("opportunityId") else "stakeholder" if item.get("stakeholderId") else "executive",
+                    "id": item.get("engagementId") or item.get("opportunityId") or item.get("stakeholderId"),
+                },
+            })
+        for item in resourcing.get("critical_items", []):
+            items.append({
+                "id": f"resourcing:{item['id']}", "category": "Resourcing", "severity": item.get("severity", "AMBER"),
+                "title": item.get("title") or item.get("name") or "Resourcing action required",
+                "context": item.get("detail") or item.get("blocker") or item.get("context"),
+                "pod": item.get("pod_id") or item.get("pod"), "owner": item.get("owner_name"),
+                "route": {"type": "resourcing", "id": item.get("id")},
+            })
+        items.sort(key=lambda item: (item["severity"] != "RED", item["category"], item["title"] or ""))
+        return {
+            "generated_at": datetime.now(timezone.utc), "scope": pod or "All", "items": items,
+            "summary": {"total": len(items), "red": sum(item["severity"] == "RED" for item in items)},
+            "delivery": {"in_app": "enabled", "external": "not_configured"},
+        }
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.get("/api/resourcing/overview")
+def resourcing_overview(pod: Optional[str] = None):
+    try:
+        return resourcing_store.overview(pod)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.get("/api/resourcing/analytics")
+def resourcing_analytics(pod: Optional[str] = None):
+    try:
+        return resourcing_store.analytics(pod)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.get("/api/resourcing/options")
+def resourcing_options(pod: Optional[str] = None):
+    return resourcing_store.options(pod)
+
+
+@app.get("/api/resource-requirements")
+def resource_requirement_list(pod: Optional[str] = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=1000)):
+    return resourcing_store.list_requirements(pod)[offset:offset + limit]
+
+
+@app.get("/api/resource-requirements/{requirement_id}")
+def resource_requirement_detail(requirement_id: str):
+    try:
+        return resourcing_store.get_requirement(requirement_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/resource-requirements", status_code=status.HTTP_201_CREATED)
+def resource_requirement_create(payload: ResourceRequirementCreate):
+    try:
+        return resourcing_store.create_requirement(payload.model_dump())
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.patch("/api/resource-requirements/{requirement_id}")
+def resource_requirement_update(requirement_id: str, payload: ResourceRequirementUpdate):
+    try:
+        return resourcing_store.update_requirement(requirement_id, payload.model_dump(exclude_unset=True))
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.get("/api/candidates")
+def candidate_list(pod: Optional[str] = None, resource_requirement_id: Optional[str] = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=1000)):
+    return resourcing_store.list_candidates(pod, resource_requirement_id)[offset:offset + limit]
+
+
+@app.get("/api/candidates/{candidate_id}")
+def candidate_detail(candidate_id: str):
+    try:
+        return resourcing_store.get_candidate(candidate_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/candidates", status_code=status.HTTP_201_CREATED)
+def candidate_create(payload: CandidateCreate):
+    try:
+        return resourcing_store.create_candidate(payload.model_dump())
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.patch("/api/candidates/{candidate_id}")
+def candidate_update(candidate_id: str, payload: CandidateUpdate, request: Request):
+    try:
+        return resourcing_store.update_candidate(candidate_id, payload.model_dump(exclude_unset=True), request.state.principal.employee_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/candidates/{candidate_id}/interviews", status_code=status.HTTP_201_CREATED)
+def interview_create(candidate_id: str, payload: CandidateInterviewCreate):
+    try:
+        return resourcing_store.add_interview(candidate_id, payload.model_dump())
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.patch("/api/interviews/{interview_id}")
+def interview_update(interview_id: str, payload: CandidateInterviewUpdate):
+    try:
+        return resourcing_store.update_interview(interview_id, payload.model_dump(exclude_unset=True))
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+def _require_commercial_access(request: Request):
+    if not request.state.principal.roles.intersection({"Account Manager", "Account Admin"}):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Commercial offer details require an Account Manager or Account Admin role")
+
+
+@app.get("/api/candidates/{candidate_id}/offer")
+def offer_detail(candidate_id: str, request: Request):
+    _require_commercial_access(request)
+    try:
+        return resourcing_store.get_offer(candidate_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/candidates/{candidate_id}/offer", status_code=status.HTTP_201_CREATED)
+def offer_create(candidate_id: str, payload: OfferCreate, request: Request):
+    _require_commercial_access(request)
+    try:
+        result, _replayed = execute_idempotent(
+            pod_engine, request.state.principal, request, payload,
+            lambda: resourcing_store.upsert_offer(candidate_id, payload.model_dump()),
+        )
+        return result
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.patch("/api/candidates/{candidate_id}/offer")
+def offer_update(candidate_id: str, payload: OfferUpdate, request: Request):
+    _require_commercial_access(request)
+    try:
+        return resourcing_store.upsert_offer(candidate_id, payload.model_dump(exclude_unset=True))
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.get("/api/onboarding")
+def onboarding_list(pod: Optional[str] = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=1000)):
+    return resourcing_store.list_onboarding(pod)[offset:offset + limit]
+
+
+@app.get("/api/onboarding/{onboarding_id}")
+def onboarding_detail(onboarding_id: str):
+    try:
+        return resourcing_store.get_onboarding(onboarding_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.patch("/api/onboarding/{onboarding_id}")
+def onboarding_update(onboarding_id: str, payload: OnboardingRecordUpdate):
+    try:
+        return resourcing_store.update_onboarding(onboarding_id, payload.model_dump(exclude_unset=True))
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.patch("/api/onboarding/{onboarding_id}/steps/{step_id}")
+def onboarding_step_update(onboarding_id: str, step_id: str, payload: OnboardingStepUpdate):
+    try:
+        return resourcing_store.update_step(onboarding_id, step_id, payload.model_dump(exclude_unset=True))
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/onboarding/{onboarding_id}/start")
+def onboarding_start(onboarding_id: str, request: Request):
+    try:
+        result, _replayed = execute_idempotent(
+            pod_engine, request.state.principal, request, {"onboarding_id": onboarding_id},
+            lambda: resourcing_store.start_candidate(onboarding_id),
+        )
+        return result
     except Exception as error:
         raise translate_domain_error(error) from error
 
@@ -613,6 +917,7 @@ def stakeholder_profile(stakeholder_id: str):
             "documents": repository.list_documents(stakeholder_id),
             "opportunities": repository.list_opportunities(stakeholder_id),
             "assignment_history": repository.list_history(stakeholder_id),
+            "resourcing": resourcing_store.stakeholder_context(stakeholder_id),
         }
     except Exception as error:
         raise translate_domain_error(error) from error
@@ -676,9 +981,32 @@ def get_meeting(meeting_id: str):
 
 
 @app.post("/api/meetings", response_model=Meeting, status_code=status.HTTP_201_CREATED)
-def create_meeting(payload: MeetingCreate):
+def create_meeting(payload: MeetingCreate, request: Request, response: Response):
     try:
-        return repository.create_meeting(payload)
+        def command():
+            stakeholder = repository.get_stakeholder(payload.stakeholder_ids[0])
+            if any(repository.get_stakeholder(value).pod != stakeholder.pod for value in payload.stakeholder_ids):
+                raise ConflictError("A meeting must use stakeholders from one pod")
+            if hasattr(repository, "create_meeting_transactional"):
+                meeting, _event = repository.create_meeting_transactional(
+                    payload,
+                    lambda connection, record: pod_store.create_meeting_event(
+                        stakeholder.pod, record,
+                        {
+                            **payload.model_dump(), "duration_minutes": 60, "event_type": "client",
+                            "opportunity_id": payload.opportunity_ids[0] if payload.opportunity_ids else None,
+                            "capco_attendees": [], "prep_required": True,
+                        },
+                        connection=connection,
+                    ),
+                )
+                return meeting
+            return repository.create_meeting(payload)
+
+        result, replayed = execute_idempotent(pod_engine, request.state.principal, request, payload, command)
+        if replayed:
+            response.headers["X-Idempotent-Replay"] = "true"
+        return result
     except Exception as error:
         raise translate_domain_error(error) from error
 
@@ -691,8 +1019,7 @@ def pod_meeting_options(pod: str):
         raise translate_domain_error(error) from error
 
 
-@app.post("/api/pods/{pod}/meetings", status_code=status.HTTP_201_CREATED)
-def create_pod_meeting(pod: str, payload: PodMeetingCreate):
+def _create_pod_meeting_command(pod: str, payload: PodMeetingCreate):
     try:
         pod_stakeholder_ids = {item.id for item in repository.list_stakeholders(pod=pod)}
         if not pod_stakeholder_ids or any(value not in pod_stakeholder_ids for value in payload.stakeholder_ids):
@@ -719,6 +1046,20 @@ def create_pod_meeting(pod: str, payload: PodMeetingCreate):
             meeting = repository.create_meeting(meeting_payload)
             event = pod_store.create_meeting_event(pod, meeting, payload.model_dump())
         return {"meeting": meeting, "event": event}
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/pods/{pod}/meetings", status_code=status.HTTP_201_CREATED)
+def create_pod_meeting(pod: str, payload: PodMeetingCreate, request: Request, response: Response):
+    try:
+        result, replayed = execute_idempotent(
+            pod_engine, request.state.principal, request, payload,
+            lambda: _create_pod_meeting_command(pod, payload),
+        )
+        if replayed:
+            response.headers["X-Idempotent-Replay"] = "true"
+        return result
     except Exception as error:
         raise translate_domain_error(error) from error
 

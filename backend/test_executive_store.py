@@ -9,7 +9,8 @@ from backend.executive_store import (
     employees, engagements, revenue_records,
 )
 from backend.pod_store import PodOperatingStore
-from backend.repository import StakeholderRepository
+from backend.repository import POD_STRUCTURE, StakeholderRepository
+from backend.models import OpportunityCreate
 
 
 class ExecutiveAnalyticsStoreTests(unittest.TestCase):
@@ -46,7 +47,7 @@ class ExecutiveAnalyticsStoreTests(unittest.TestCase):
             source_total = connection.execute(select(func.sum(revenue_records.c.amount)).where(
                 revenue_records.c.recognized_on.between(date(2026, 7, 1), date(2026, 9, 30))
             )).scalar_one()
-        self.assertAlmostEqual(source_total, overview["accountPulse"]["revenue"])
+        self.assertAlmostEqual(float(source_total), overview["accountPulse"]["revenue"])
         self.assertAlmostEqual(
             overview["accountPulse"]["revenue"],
             sum(row["revenue"] for row in overview["podPerformance"]),
@@ -59,20 +60,30 @@ class ExecutiveAnalyticsStoreTests(unittest.TestCase):
     def test_utilization_matches_capacity_and_billable_allocation(self):
         overview = self.store.overview("quarter", self.anchor)
         with self.engine.connect() as connection:
-            capacities = dict(connection.execute(select(
+            capacities = {employee_id: float(hours) for employee_id, hours in connection.execute(select(
                 employee_capacity.c.employee_id, employee_capacity.c.available_hours
-            ).where(employee_capacity.c.period_start == date(2026, 7, 1))).all())
-            assignments = connection.execute(select(engagement_assignments).where(
+            ).where(employee_capacity.c.period_start == date(2026, 7, 1))).all()}
+            assignments = connection.execute(select(engagement_assignments).join(
+                engagements, engagements.c.id == engagement_assignments.c.engagement_id,
+            ).where(
+                func.lower(engagements.c.status) == "active",
                 engagement_assignments.c.start_date <= date(2026, 9, 30),
                 engagement_assignments.c.end_date >= date(2026, 7, 1),
             )).mappings().all()
-        denominator = sum(capacities[row["employee_id"]] for row in assignments)
+        def working_days(start, end):
+            return sum((start.fromordinal(day)).weekday() < 5 for day in range(start.toordinal(), end.toordinal() + 1))
+
+        period_days = working_days(date(2026, 7, 1), date(2026, 9, 30))
+        employee_ids = {row["employee_id"] for row in assignments}
+        denominator = sum(capacities[employee_id] for employee_id in employee_ids)
         numerator = sum(
-            capacities[row["employee_id"]] * row["allocation_percent"] / 100
+            capacities[row["employee_id"]]
+            * working_days(max(date(2026, 7, 1), row["start_date"]), min(date(2026, 9, 30), row["end_date"])) / period_days
+            * float(row["allocation_percent"]) / 100
             for row in assignments if row["billable"]
         )
         self.assertAlmostEqual(numerator / denominator, overview["accountPulse"]["utilization"])
-        self.assertEqual(len({row["employee_id"] for row in assignments}), overview["accountPulse"]["headcount"])
+        self.assertEqual(len(employee_ids), overview["accountPulse"]["headcount"])
 
     def test_pipeline_weighting_uses_canonical_opportunity_records(self):
         overview = self.store.overview("quarter", self.anchor)
@@ -82,6 +93,20 @@ class ExecutiveAnalyticsStoreTests(unittest.TestCase):
             overview["commercial"]["weightedPipeline"],
         )
         self.assertTrue(all(row["stakeholderId"] in self.repository.stakeholders for row in opportunities))
+
+    def test_closed_opportunities_are_not_counted_as_open_pipeline(self):
+        stakeholder = self.repository.list_stakeholders(pod="ISG")[0]
+        closed = self.repository.create_opportunity(OpportunityCreate(
+            name="Closed pipeline test", estimated_value=999_999, probability=100,
+            stage="Closed Won", stakeholder_ids=[stakeholder.id],
+        ))
+        try:
+            overview = self.store.overview("quarter", self.anchor)
+            self.assertIn(closed.id, {row["id"] for row in overview["commercial"]["opportunities"]})
+            open_rows = [row for row in overview["commercial"]["opportunities"] if row["stage"] not in {"Won", "Lost"}]
+            self.assertEqual(sum(row["value"] for row in open_rows), overview["commercial"]["pipeline"])
+        finally:
+            self.repository.opportunities.pop(closed.id, None)
 
     def test_project_pod_and_segment_rollups_reconcile(self):
         overview = self.store.overview("quarter", self.anchor)
@@ -131,7 +156,7 @@ class ExecutiveAnalyticsStoreTests(unittest.TestCase):
         definitions = overview["meta"]["definitions"]
         for key in ("utilization", "weightedPipeline", "deliveryOnTime", "capacityGap", "heatmap"):
             self.assertTrue(definitions[key])
-        valid = {"Strong", "Watch", "Action"}
+        valid = {"Strong", "Watch", "Action", "Unknown"}
         self.assertTrue(all(set(row["heatmap"].values()) <= valid for row in overview["segmentPerformance"]))
 
     def test_weekly_view_defaults_to_monday_and_includes_all_pods(self):
@@ -177,6 +202,12 @@ class ExecutiveAnalyticsStoreTests(unittest.TestCase):
         self.assertAlmostEqual(sum(row["value"] for row in active), weekly["salesSummary"]["pipeline"])
         self.assertAlmostEqual(sum(row["weightedValue"] for row in active), weekly["salesSummary"]["weightedPipeline"])
         self.assertLessEqual(len(weekly["recommendations"]), 3)
+        future_items = [item for week in weekly["upcomingWeeks"] for item in week["items"]]
+        self.assertTrue(future_items)
+        self.assertTrue(all(item.get("sourceType") and item.get("sourceId") for item in future_items))
+        supported = [item for employee in weekly["teamActivity"] for item in employee["opportunities"]]
+        self.assertTrue(all(item.get("pod") in POD_STRUCTURE for item in supported))
+        self.assertTrue(all(item.get("pod") in {*POD_STRUCTURE, "All"} for item in weekly["recommendations"]))
 
     def test_weekly_pod_filter_preserves_canonical_employee_ids(self):
         weekly = self.store.weekly(date(2026, 8, 24), pod="MSIM")

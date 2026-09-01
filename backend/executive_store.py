@@ -5,8 +5,9 @@ from datetime import date, datetime, timedelta, timezone
 from math import ceil
 
 from sqlalchemy import (
-    Boolean, Column, Date, DateTime, Float, Index, Integer, MetaData, String,
-    Table, Text, and_, func, insert, inspect, or_, select, update,
+    Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
+    MetaData, Numeric, String, Table, Text, UniqueConstraint, and_, func, insert, inspect,
+    or_, select, update,
 )
 from sqlalchemy.engine import Engine
 
@@ -32,15 +33,27 @@ engagements = Table(
     Column("name", String(240), nullable=False),
     Column("health", String(20), nullable=False),
     Column("status", String(30), nullable=False),
-    Column("commercial_value", Float, nullable=False),
-    Column("quarterly_revenue_target", Float, nullable=False),
+    Column("commercial_value", Numeric(14, 2), nullable=False),
+    Column("quarterly_revenue_target", Numeric(14, 2), nullable=False),
     Column("start_date", Date, nullable=False),
     Column("end_date", Date, nullable=False),
     Column("renewal_date", Date),
     Column("executive_sponsor_id", String(180)),
     Column("opportunity_id", String(180)),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
+    Column("source_system", String(80), nullable=False, default="manual"),
+    Column("source_record_id", String(240)),
+    Column("last_synced_at", DateTime(timezone=True)),
+    UniqueConstraint("source_system", "source_record_id", name="uq_engagement_source_record"),
+    CheckConstraint("commercial_value >= 0", name="ck_engagement_commercial_value"),
+    CheckConstraint("quarterly_revenue_target >= 0", name="ck_engagement_revenue_target"),
+    CheckConstraint("end_date >= start_date", name="ck_engagement_dates"),
+    CheckConstraint("health IN ('GREEN', 'AMBER', 'RED')", name="ck_engagement_health"),
+    CheckConstraint("status IN ('Active', 'Planned', 'Completed', 'Cancelled')", name="ck_engagement_status"),
 )
 Index("idx_executive_engagement_period", engagements.c.pod_id, engagements.c.start_date, engagements.c.end_date)
+Index("idx_executive_engagement_sync", engagements.c.source_system, engagements.c.last_synced_at)
 
 engagement_stakeholders = Table(
     "engagement_stakeholders", executive_metadata,
@@ -63,7 +76,7 @@ employees = Table(
     Column("capability", String(120)),
     Column("location", String(120), nullable=False),
     Column("active", Boolean, nullable=False, default=True),
-    Column("manager_employee_id", String(120)),
+    Column("manager_employee_id", String(120), ForeignKey("capco_employees.id", name="fk_capco_employee_manager", ondelete="RESTRICT")),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()),
     Column("source_system", String(80), nullable=False, default="manual"),
@@ -76,41 +89,49 @@ Index("idx_capco_employees_manager", employees.c.manager_employee_id)
 employee_skills = Table(
     "employee_skills", executive_metadata,
     Column("id", String(150), primary_key=True),
-    Column("employee_id", String(120), nullable=False),
+    Column("employee_id", String(120), ForeignKey("capco_employees.id", name="fk_employee_skills_employee", ondelete="RESTRICT"), nullable=False),
     Column("capability", String(120), nullable=False),
+    UniqueConstraint("employee_id", "capability", name="uq_employee_skill"),
 )
 Index("idx_employee_skills_capability", employee_skills.c.capability, employee_skills.c.employee_id)
 
 employee_capacity = Table(
     "employee_capacity", executive_metadata,
     Column("id", String(160), primary_key=True),
-    Column("employee_id", String(120), nullable=False),
+    Column("employee_id", String(120), ForeignKey("capco_employees.id", name="fk_employee_capacity_employee", ondelete="RESTRICT"), nullable=False),
     Column("period_start", Date, nullable=False),
     Column("period_end", Date, nullable=False),
-    Column("available_hours", Float, nullable=False),
+    Column("available_hours", Numeric(10, 2), nullable=False),
+    CheckConstraint("period_end >= period_start", name="ck_employee_capacity_dates"),
+    CheckConstraint("available_hours >= 0", name="ck_employee_capacity_hours"),
+    UniqueConstraint("employee_id", "period_start", "period_end", name="uq_employee_capacity_period"),
 )
 Index("idx_employee_capacity_period", employee_capacity.c.period_start, employee_capacity.c.period_end)
 
 engagement_assignments = Table(
     "engagement_assignments", executive_metadata,
     Column("id", String(160), primary_key=True),
-    Column("employee_id", String(120), nullable=False),
-    Column("engagement_id", String(120), nullable=False),
-    Column("allocation_percent", Float, nullable=False),
+    Column("employee_id", String(120), ForeignKey("capco_employees.id", name="fk_assignments_employee", ondelete="RESTRICT"), nullable=False),
+    Column("engagement_id", String(120), ForeignKey("executive_engagements.id", name="fk_assignments_engagement", ondelete="RESTRICT"), nullable=False),
+    Column("allocation_percent", Numeric(5, 2), nullable=False),
     Column("assignment_role", String(120)),
     Column("billable", Boolean, nullable=False),
     Column("status", String(30), nullable=False, default="Active"),
     Column("start_date", Date, nullable=False),
     Column("end_date", Date, nullable=False),
+    CheckConstraint("allocation_percent > 0 AND allocation_percent <= 100", name="ck_engagement_assignment_allocation"),
+    CheckConstraint("end_date >= start_date", name="ck_engagement_assignment_dates"),
+    CheckConstraint("status IN ('Active', 'Planned', 'Completed', 'Cancelled')", name="ck_engagement_assignment_status"),
 )
 Index("idx_engagement_assignments_period", engagement_assignments.c.engagement_id, engagement_assignments.c.start_date, engagement_assignments.c.end_date)
 
 revenue_records = Table(
     "revenue_records", executive_metadata,
     Column("id", String(160), primary_key=True),
-    Column("engagement_id", String(120), nullable=False),
+    Column("engagement_id", String(120), ForeignKey("executive_engagements.id", name="fk_revenue_engagement", ondelete="RESTRICT"), nullable=False),
     Column("recognized_on", Date, nullable=False),
-    Column("amount", Float, nullable=False),
+    Column("amount", Numeric(14, 2), nullable=False),
+    CheckConstraint("amount >= 0", name="ck_revenue_amount"),
 )
 Index("idx_revenue_records_period", revenue_records.c.recognized_on, revenue_records.c.engagement_id)
 
@@ -300,8 +321,9 @@ class ExecutiveAnalyticsStore:
                 capacity_rows.append({"id": f"capacity-{period_label}-{index + 1:03d}", "employee_id": employee_id, "period_start": period_start, "period_end": period_end, "available_hours": 520.0})
             project = project_rows[index % len(project_rows)]
             allocation = [70, 80, 85, 90, 95, 100][index % 6]
-            if index in (11, 37, 62, 79):
-                allocation = 110
+            # Demo rows must satisfy the same production allocation invariant.
+            # Over-allocation scenarios belong in explicit validation fixtures,
+            # not in the default dataset.
             rolloff = q3_start + timedelta(days=75 + (index % 14)) if index in (5, 16, 27, 38, 49) else project["end_date"]
             assignment_rows.append({
                 "id": f"assignment-{index + 1:03d}", "employee_id": employee_id,
@@ -469,10 +491,35 @@ class ExecutiveAnalyticsStore:
                     connection.execute(update(engagements).where(and_(engagements.c.pod_id == "MSIM", engagements.c.business_unit == unit)).values(opportunity_id=opportunity.id))
 
     @staticmethod
-    def _status(value: float, strong: float, watch: float, inverse: bool = False) -> str:
+    def _status(value: float | None, strong: float, watch: float, inverse: bool = False) -> str:
+        if value is None:
+            return "Unknown"
         if inverse:
             return "Strong" if value <= strong else "Watch" if value <= watch else "Action"
         return "Strong" if value >= strong else "Watch" if value >= watch else "Action"
+
+    @staticmethod
+    def _working_days(start: date, end: date) -> int:
+        if end < start:
+            return 0
+        return sum((start + timedelta(days=offset)).weekday() < 5 for offset in range((end - start).days + 1))
+
+    @classmethod
+    def _overlap_working_days(cls, left_start: date, left_end: date, right_start: date, right_end: date) -> int:
+        return cls._working_days(max(left_start, right_start), min(left_end, right_end))
+
+    @classmethod
+    def _quarterly_target_for_period(cls, quarterly_target: float, start: date, end: date) -> float:
+        total = 0.0
+        cursor = date(start.year, ((start.month - 1) // 3) * 3 + 1, 1)
+        while cursor <= end:
+            next_quarter = date(cursor.year + (1 if cursor.month == 10 else 0), 1 if cursor.month == 10 else cursor.month + 3, 1)
+            quarter_end = next_quarter - timedelta(days=1)
+            quarter_days = cls._working_days(cursor, quarter_end)
+            overlap_days = cls._overlap_working_days(start, end, cursor, quarter_end)
+            total += quarterly_target * overlap_days / quarter_days if quarter_days else 0
+            cursor = next_quarter
+        return total
 
     @staticmethod
     def _prior_bounds(start: date, end: date) -> tuple[date, date]:
@@ -496,7 +543,7 @@ class ExecutiveAnalyticsStore:
         prior_start, prior_end = self._prior_bounds(start, end)
         pod_filter = None if not pod or pod == "All" else pod
         with self.engine.connect() as connection:
-            project_rows = [dict(row) for row in connection.execute(select(engagements).where(and_(engagements.c.start_date <= end, engagements.c.end_date >= start, *([engagements.c.pod_id == pod_filter] if pod_filter else [])))).mappings()]
+            project_rows = [dict(row) for row in connection.execute(select(engagements).where(and_(func.lower(engagements.c.status) == "active", engagements.c.start_date <= end, engagements.c.end_date >= start, *([engagements.c.pod_id == pod_filter] if pod_filter else [])))).mappings()]
             project_ids = [row["id"] for row in project_rows]
             revenue = [dict(row) for row in connection.execute(select(revenue_records).where(and_(revenue_records.c.engagement_id.in_(project_ids), revenue_records.c.recognized_on.between(start, end)))).mappings()] if project_ids else []
             prior_revenue = [dict(row) for row in connection.execute(select(revenue_records).where(and_(revenue_records.c.engagement_id.in_(project_ids), revenue_records.c.recognized_on.between(prior_start, prior_end)))).mappings()] if project_ids else []
@@ -506,32 +553,60 @@ class ExecutiveAnalyticsStore:
             capacities = [dict(row) for row in connection.execute(select(employee_capacity).where(and_(employee_capacity.c.employee_id.in_(employee_ids), employee_capacity.c.period_start <= end, employee_capacity.c.period_end >= start))).mappings()] if employee_ids else []
             skills = [dict(row) for row in connection.execute(select(employee_skills).where(employee_skills.c.employee_id.in_(employee_ids))).mappings()] if employee_ids else []
             milestones = [dict(row) for row in connection.execute(select(engagement_milestones).where(and_(engagement_milestones.c.engagement_id.in_(project_ids), engagement_milestones.c.due_date.between(start, end)))).mappings()] if project_ids else []
-            demands = [dict(row) for row in connection.execute(select(resource_demand).where(and_(resource_demand.c.status == "Open", resource_demand.c.start_date <= end + timedelta(days=60), resource_demand.c.end_date >= start, *([resource_demand.c.pod_id == pod_filter] if pod_filter else [])))).mappings()]
+            demands = (
+                self.resourcing_store.executive_demand_records(pod_filter, end + timedelta(days=60))
+                if getattr(self, "resourcing_store", None)
+                else [dict(row) for row in connection.execute(select(resource_demand).where(and_(resource_demand.c.status == "Open", resource_demand.c.start_date <= end + timedelta(days=60), resource_demand.c.end_date >= start, *([resource_demand.c.pod_id == pod_filter] if pod_filter else [])))).mappings()]
+            )
             risks = [dict(row) for row in connection.execute(select(pod_critical_items).where(and_(pod_critical_items.c.status != "Resolved", *([pod_critical_items.c.pod_id == pod_filter] if pod_filter else [])))).mappings()]
             changes = [dict(row) for row in connection.execute(select(executive_changes).where(and_(executive_changes.c.event_date.between(start, end), *([or_(executive_changes.c.pod_id == pod_filter, executive_changes.c.pod_id == "All")] if pod_filter else []))).order_by(executive_changes.c.event_date.desc())).mappings()]
+
+        for row in project_rows:
+            row["commercial_value"] = float(row["commercial_value"])
+            row["quarterly_revenue_target"] = float(row["quarterly_revenue_target"])
+        for row in [*revenue, *prior_revenue]:
+            row["amount"] = float(row["amount"])
+        for row in capacities:
+            row["available_hours"] = float(row["available_hours"])
+        for row in assignments:
+            row["allocation_percent"] = float(row["allocation_percent"])
 
         projects_by_id = {row["id"]: row for row in project_rows}
         employee_by_id = {row["id"]: row for row in employee_rows}
         capacity_by_employee = defaultdict(float)
         for row in capacities:
-            capacity_by_employee[row["employee_id"]] += row["available_hours"]
+            capacity_period_days = self._working_days(row["period_start"], row["period_end"])
+            overlap_days = self._overlap_working_days(start, end, row["period_start"], row["period_end"])
+            if capacity_period_days:
+                capacity_by_employee[row["employee_id"]] += row["available_hours"] * overlap_days / capacity_period_days
         allocation_hours_by_employee = defaultdict(float)
         billable_hours_by_employee = defaultdict(float)
+        allocation_hours_by_project = defaultdict(float)
+        billable_hours_by_project = defaultdict(float)
+        assignment_capacity_by_project = defaultdict(float)
         assignments_by_project = defaultdict(list)
+        selected_working_days = self._working_days(start, end)
         for row in assignments:
             assignments_by_project[row["engagement_id"]].append(row)
-            hours = capacity_by_employee[row["employee_id"]] * row["allocation_percent"] / 100
+            active_days = self._overlap_working_days(start, end, row["start_date"], row["end_date"])
+            active_fraction = active_days / selected_working_days if selected_working_days else 0
+            assignment_capacity = capacity_by_employee[row["employee_id"]] * active_fraction
+            hours = assignment_capacity * row["allocation_percent"] / 100
             allocation_hours_by_employee[row["employee_id"]] += hours
+            allocation_hours_by_project[row["engagement_id"]] += hours
+            assignment_capacity_by_project[row["engagement_id"]] += assignment_capacity
             if row["billable"]:
                 billable_hours_by_employee[row["employee_id"]] += hours
+                billable_hours_by_project[row["engagement_id"]] += hours
         available_hours = sum(capacity_by_employee.values())
         billable_hours = sum(billable_hours_by_employee.values())
         allocated_hours = sum(allocation_hours_by_employee.values())
         utilization = billable_hours / available_hours if available_hours else None
         allocated_utilization = allocated_hours / available_hours if available_hours else None
-        available_fte = sum(max(0, capacity_by_employee[value] - allocation_hours_by_employee[value]) for value in employee_ids) / 520
+        period_fte_hours = max(1, selected_working_days * 8)
+        available_fte = sum(max(0, capacity_by_employee[value] - allocation_hours_by_employee[value]) for value in employee_ids) / period_fte_hours
         overallocated = sum(allocation_hours_by_employee[value] > capacity_by_employee[value] for value in employee_ids)
-        rolling_off = sum(start <= row["end_date"] <= min(end + timedelta(days=30), date.today() + timedelta(days=30)) for row in assignments)
+        rolling_off = sum(end < row["end_date"] <= end + timedelta(days=30) for row in assignments)
 
         revenue_by_project = defaultdict(float)
         prior_by_project = defaultdict(float)
@@ -548,9 +623,10 @@ class ExecutiveAnalyticsStore:
             milestones_by_project[row["engagement_id"]].append(row)
 
         opportunities = self._opportunities(pod_filter)
+        open_opportunities = [row for row in opportunities if row["stage"] not in {"Won", "Lost"}]
         pipeline_by_segment = defaultdict(float)
         weighted_by_segment = defaultdict(float)
-        for row in opportunities:
+        for row in open_opportunities:
             key = (row["pod"], row["division"], row["businessUnit"])
             pipeline_by_segment[key] += row["value"]
             weighted_by_segment[key] += row["weightedValue"]
@@ -567,8 +643,8 @@ class ExecutiveAnalyticsStore:
         project_views = []
         for row in project_rows:
             team = assignments_by_project[row["id"]]
-            team_capacity = sum(capacity_by_employee[value["employee_id"]] for value in team)
-            team_billable = sum(billable_hours_by_employee[value["employee_id"]] for value in team)
+            team_capacity = assignment_capacity_by_project[row["id"]]
+            team_billable = billable_hours_by_project[row["id"]]
             project_milestones = milestones_by_project[row["id"]]
             on_track = sum(value["status"] in ("Completed", "On Track") for value in project_milestones)
             sponsor = self.repository.stakeholders.get(row["executive_sponsor_id"])
@@ -577,7 +653,7 @@ class ExecutiveAnalyticsStore:
                 "health": row["health"], "portfolioGroup": "Healthy" if row["health"] == "GREEN" else "Watch" if row["health"] == "AMBER" else "At Risk",
                 "commercialValue": row["commercial_value"], "revenue": revenue_by_project[row["id"]], "teamSize": len(team),
                 "utilization": team_billable / team_capacity if team_capacity else None, "milestonesOnTrack": on_track, "milestoneCount": len(project_milestones),
-                "nextMilestone": min((value["due_date"] for value in project_milestones if value["due_date"] >= date.today()), default=None),
+                "nextMilestone": min((value["due_date"] for value in project_milestones if value["due_date"] >= start), default=None),
                 "openRisks": len(risk_by_project[row["id"]]), "executiveSponsor": sponsor.name if sponsor else "Not linked", "stakeholderId": row["executive_sponsor_id"],
                 "opportunityId": row["opportunity_id"], "renewalDate": row["renewal_date"].isoformat() if row["renewal_date"] else None,
             })
@@ -590,9 +666,10 @@ class ExecutiveAnalyticsStore:
             rows = [row for row in project_views if row["pod"] == pod_name]
             pod_employee_ids = {value["employee_id"] for project in project_rows if project["pod_id"] == pod_name for value in assignments_by_project[project["id"]]}
             pod_capacity = sum(capacity_by_employee[value] for value in pod_employee_ids)
-            pod_billable = sum(billable_hours_by_employee[value] for value in pod_employee_ids)
+            pod_project_ids = {project["id"] for project in project_rows if project["pod_id"] == pod_name}
+            pod_billable = sum(billable_hours_by_project[value] for value in pod_project_ids)
             dash = pod_dashboards[pod_name]
-            pod_opps = [value for value in opportunities if value["pod"] == pod_name]
+            pod_opps = [value for value in open_opportunities if value["pod"] == pod_name]
             pod_views.append({"pod": pod_name, "revenue": sum(row["revenue"] for row in rows), "pipeline": sum(value["value"] for value in pod_opps), "weightedPipeline": sum(value["weightedValue"] for value in pod_opps), "utilization": pod_billable / pod_capacity if pod_capacity else None, "headcount": len(pod_employee_ids), "activeProjects": len(rows), "projectsAtRisk": sum(row["health"] == "RED" for row in rows), "strategicStakeholders": sum("Buyer" in person["role"] for person in dash["people"]), "criticalIssues": sum(item["severity"] in ("RED", "AMBER") for item in dash["criticalItems"])})
 
         for key in segment_keys:
@@ -601,9 +678,9 @@ class ExecutiveAnalyticsStore:
             project_ids_for_segment = {row["id"] for row in rows}
             segment_employee_ids = {value["employee_id"] for project_id in project_ids_for_segment for value in assignments_by_project[project_id]}
             segment_capacity = sum(capacity_by_employee[value] for value in segment_employee_ids)
-            segment_billable = sum(billable_hours_by_employee[value] for value in segment_employee_ids)
+            segment_billable = sum(billable_hours_by_project[value] for value in project_ids_for_segment)
             relationships = relationship_by_segment.get(key, [])
-            attention_rate = sum(value["needsAttention"] for value in relationships) / len(relationships) if relationships else 1
+            attention_rate = sum(value["needsAttention"] for value in relationships) / len(relationships) if relationships else None
             segment_revenue = sum(row["revenue"] for row in rows)
             segment_pipeline = pipeline_by_segment[key]
             segment_utilization = segment_billable / segment_capacity if segment_capacity else None
@@ -611,16 +688,14 @@ class ExecutiveAnalyticsStore:
             milestone_total = sum(row["milestoneCount"] for row in rows)
             milestone_on_track = sum(row["milestonesOnTrack"] for row in rows)
             delivery_rate = milestone_on_track / milestone_total if milestone_total else None
-            segment_views.append({"id": "-".join(value.lower().replace(" ", "-") for value in key), "pod": pod_name, "division": division, "businessUnit": unit, "revenue": segment_revenue, "pipeline": segment_pipeline, "weightedPipeline": weighted_by_segment[key], "utilization": segment_utilization, "headcount": len(segment_employee_ids), "activeProjects": len(rows), "projectsAtRisk": red_risks, "strategicStakeholders": sum(value.get("importance") == "High" for value in relationships), "meetingActivity": sum(value.get("days") is not None and value["days"] <= 60 for value in relationships), "deliveryOnTimeRate": delivery_rate, "relationshipAttentionRate": attention_rate, "heatmap": {"revenue": self._status(segment_revenue, 1_000_000, 500_000), "pipeline": self._status(segment_pipeline, 1_500_000, 500_000), "utilization": self._status(segment_utilization or 0, .85, .75), "delivery": self._status(delivery_rate or 0, .85, .70), "relationships": self._status(attention_rate, .25, .50, inverse=True), "risk": self._status(red_risks, 0, 1, inverse=True)}})
+            segment_views.append({"id": "-".join(value.lower().replace(" ", "-") for value in key), "pod": pod_name, "division": division, "businessUnit": unit, "revenue": segment_revenue, "pipeline": segment_pipeline, "weightedPipeline": weighted_by_segment[key], "utilization": segment_utilization, "headcount": len(segment_employee_ids), "activeProjects": len(rows), "projectsAtRisk": red_risks, "strategicStakeholders": sum(value.get("importance") == "High" for value in relationships), "meetingActivity": sum(value.get("days") is not None and value["days"] <= 60 for value in relationships), "deliveryOnTimeRate": delivery_rate, "relationshipAttentionRate": attention_rate, "heatmap": {"revenue": self._status(segment_revenue, 1_000_000, 500_000), "pipeline": self._status(segment_pipeline, 1_500_000, 500_000), "utilization": self._status(segment_utilization, .85, .75), "delivery": self._status(delivery_rate, .85, .70), "relationships": self._status(attention_rate, .25, .50, inverse=True), "risk": self._status(red_risks, 0, 1, inverse=True)}})
 
         total_revenue = sum(row["amount"] for row in revenue)
         total_prior_revenue = sum(row["amount"] for row in prior_revenue)
-        target = sum(row["quarterly_revenue_target"] for row in project_rows)
-        if period == "month": target /= 3
-        elif period == "ytd": target *= max(1, ceil(end.month / 3))
+        target = sum(self._quarterly_target_for_period(row["quarterly_revenue_target"], start, end) for row in project_rows)
         revenue_change = (total_revenue - total_prior_revenue) / total_prior_revenue if total_prior_revenue else None
         milestone_total = len(milestones)
-        milestone_on_track = sum(row["status"] in ("Completed", "On Track") for row in milestones)
+        milestone_on_track = sum(row["status"] == "Completed" and row.get("completed_date") and row["completed_date"] <= row["due_date"] for row in milestones)
         red_risks = [row for row in risks if row["severity"] == "RED"]
         strategic_count = sum("Buyer" in person["role"] for dashboard in pod_dashboards.values() for person in dashboard["people"])
         relationship_attention = [
@@ -635,7 +710,7 @@ class ExecutiveAnalyticsStore:
         capability_rows = []
         for capability in CAPABILITIES:
             capable = [value for value in employee_ids if capability in capability_by_employee[value]]
-            capacity_fte = sum(max(0, capacity_by_employee[value] - allocation_hours_by_employee[value]) for value in capable) / 520
+            capacity_fte = sum(max(0, capacity_by_employee[value] - allocation_hours_by_employee[value]) for value in capable) / period_fte_hours
             demand = sum(row["required_fte"] for row in demands if row["capability"] == capability)
             rounded_capacity, rounded_demand = round(capacity_fte, 1), round(demand, 1)
             capability_rows.append({"capability": capability, "availableCapacity": rounded_capacity, "demand": rounded_demand, "gap": round(rounded_capacity - rounded_demand, 1), "employeeIds": capable, "employees": [{"id": value, "name": employee_by_id[value]["name"], "role": employee_by_id[value]["role"]} for value in capable if value in employee_by_id], "demandIds": [row["id"] for row in demands if row["capability"] == capability]})
@@ -665,16 +740,34 @@ class ExecutiveAnalyticsStore:
             funnel.append({"stage": stage, "count": len(rows), "value": sum(row["value"] for row in rows), "weightedValue": sum(row["weightedValue"] for row in rows), "opportunityIds": [row["id"] for row in rows]})
 
         change_views = [{**row, "event_date": row["event_date"].isoformat()} for row in changes]
-        return {
+        result = {
             "meta": {"period": period, "startDate": start.isoformat(), "endDate": end.isoformat(), "pod": pod_filter or "All", "generatedAt": datetime.now(timezone.utc).isoformat(), "dataSource": "sql", "definitions": {"utilization": "Billable allocated hours ÷ available working hours for employees with capacity records.", "weightedPipeline": "Opportunity value × persisted probability.", "deliveryOnTime": "Completed or on-track milestones ÷ milestones due in the selected period.", "capacityGap": "Qualified available FTE − open 60-day resource demand.", "heatmap": "Revenue: Strong ≥ $1M, Watch ≥ $500K. Pipeline: Strong ≥ $1.5M, Watch ≥ $500K. Utilization: Strong ≥ 85%, Watch ≥ 75%. Delivery: Strong ≥ 85%, Watch ≥ 70%. Relationships: Strong ≤ 25% attention, Watch ≤ 50%. Risk: Strong = 0 Red projects, Watch = 1."}},
-            "accountPulse": {"revenue": total_revenue, "revenueChange": revenue_change, "revenueTargetAttainment": total_revenue / target if target else None, "pipeline": sum(row["value"] for row in opportunities), "weightedPipeline": sum(row["weightedValue"] for row in opportunities), "activeProjects": len(project_views), "projectsAtRisk": sum(row["health"] == "RED" for row in project_views), "headcount": len(employee_ids), "utilization": utilization, "milestonesOnTrack": milestone_on_track / milestone_total if milestone_total else None, "strategicStakeholders": strategic_count, "relationshipsNeedingAttention": len(relationship_attention), "criticalItems": len(risks), "redCriticalItems": len(red_risks)},
+            "accountPulse": {"revenue": total_revenue, "revenueChange": revenue_change, "revenueTargetAttainment": total_revenue / target if target else None, "pipeline": sum(row["value"] for row in open_opportunities), "weightedPipeline": sum(row["weightedValue"] for row in open_opportunities), "activeProjects": len(project_views), "projectsAtRisk": sum(row["health"] == "RED" for row in project_views), "headcount": len(employee_ids), "utilization": utilization, "milestonesOnTrack": milestone_on_track / milestone_total if milestone_total else None, "strategicStakeholders": strategic_count, "relationshipsNeedingAttention": len(relationship_attention), "criticalItems": len(risks), "redCriticalItems": len(red_risks)},
             "executiveAttention": attention[:6], "podPerformance": pod_views, "segmentPerformance": segment_views,
             "projectPortfolio": project_views, "workforce": {"activeEmployees": len(employee_ids), "billableEmployees": sum(billable_hours_by_employee[value] > 0 for value in employee_ids), "nonBillableEmployees": sum(billable_hours_by_employee[value] == 0 for value in employee_ids), "utilization": utilization, "allocatedUtilization": allocated_utilization, "availableCapacityFte": round(available_fte, 1), "rollingOff30Days": rolling_off, "openDemandFte": round(sum(row["required_fte"] for row in demands), 1), "overallocatedPeople": overallocated, "byPod": [{"pod": row["pod"], "utilization": row["utilization"], "headcount": row["headcount"]} for row in pod_views], "byLevel": [{"level": level, "count": sum(row["level"] == level for row in employee_rows)} for level in LEVELS], "byLocation": [{"location": location, "count": sum(row["location"] == location for row in employee_rows)} for location in LOCATIONS]},
-            "capacityDemand": capability_rows, "commercial": {"revenue": total_revenue, "pipeline": sum(row["value"] for row in opportunities), "weightedPipeline": sum(row["weightedValue"] for row in opportunities), "averageDealSize": sum(row["value"] for row in opportunities) / len(opportunities) if opportunities else None, "funnel": funnel, "opportunities": opportunities},
+            "capacityDemand": capability_rows, "commercial": {"revenue": total_revenue, "pipeline": sum(row["value"] for row in open_opportunities), "weightedPipeline": sum(row["weightedValue"] for row in open_opportunities), "averageDealSize": sum(row["value"] for row in open_opportunities) / len(open_opportunities) if open_opportunities else None, "funnel": funnel, "opportunities": opportunities},
             "delivery": {"activeEngagements": len(project_views), "green": sum(row["health"] == "GREEN" for row in project_views), "amber": sum(row["health"] == "AMBER" for row in project_views), "red": sum(row["health"] == "RED" for row in project_views), "milestonesOnTimeRate": milestone_on_track / milestone_total if milestone_total else None, "clientEscalations": sum("ESCALATION" in row["item_type"] for row in risks), "renewals90Days": sum(row.get("renewalDate") and date.fromisoformat(row["renewalDate"]) <= end + timedelta(days=90) for row in project_views)},
             "relationships": {"strategicStakeholders": strategic_count, "needingAttention": len(relationship_attention), "byPod": [{"pod": pod_name, "count": len([row for row in dashboard["relationshipAttention"] if "Buyer" in next((person["role"] for person in dashboard["people"] if person["id"] == row["stakeholderId"]), "")]), "high": sum(row["importance"] == "High" and "Buyer" in next((person["role"] for person in dashboard["people"] if person["id"] == row["stakeholderId"]), "") for row in dashboard["relationshipAttention"])} for pod_name, dashboard in pod_dashboards.items()], "items": relationship_attention[:10]},
             "changes": change_views, "recommendations": recommendations[:6],
         }
+        result["meta"].update({
+            "formulaVersion": "1.0.0",
+            "accountTimezone": "America/New_York",
+            "metricMetadata": {
+                "pipeline": {"sampleSize": len(open_opportunities)},
+                "weightedPipeline": {"sampleSize": len(open_opportunities)},
+                "utilization": {"sampleSize": len(employee_ids)},
+                "deliveryOnTime": {"sampleSize": milestone_total},
+                "revenue": {"sampleSize": len(revenue)},
+            },
+        })
+        result["meta"]["definitions"].update({
+            "utilization": "Period-prorated billable assignment hours divided by period-prorated available working hours.",
+            "weightedPipeline": "Open opportunity value multiplied by persisted probability; Closed Won and Closed Lost are excluded.",
+            "deliveryOnTime": "Milestones completed on or before their due date divided by milestones due in the selected period.",
+            "capacityGap": "Qualified period-prorated available FTE minus open 60-day resource demand.",
+        })
+        return result
 
     @staticmethod
     def week_bounds(week_start: date | None = None) -> tuple[date, date]:
@@ -923,6 +1016,7 @@ class ExecutiveAnalyticsStore:
                 {
                     "id": opportunity_id,
                     "name": opportunity_by_id[opportunity_id]["name"],
+                    "pod": opportunity_by_id[opportunity_id]["pod"],
                     "stage": opportunity_by_id[opportunity_id]["stage"],
                     "value": opportunity_by_id[opportunity_id]["value"],
                 }
@@ -1025,20 +1119,20 @@ class ExecutiveAnalyticsStore:
         for row in event_rows:
             event_date = self._date_value(row["start_at"])
             if end < event_date <= outlook_end and (row["is_client"] or row["importance"] == "High" or row["event_type"] in {"deadline", "critical", "workshop"}):
-                all_future_items.append({"id": row["id"], "date": event_date, "type": row["event_type"], "title": row["title"], "pod": row["pod_id"], "engagementId": event_project(row), "stakeholderId": row.get("stakeholder_id"), "opportunityId": row.get("opportunity_id")})
+                all_future_items.append({"id": row["id"], "sourceType": "meeting" if row.get("source_meeting_id") else "event", "sourceId": row.get("source_meeting_id") or row["id"], "date": event_date, "type": row["event_type"], "title": row["title"], "pod": row["pod_id"], "engagementId": event_project(row), "stakeholderId": row.get("stakeholder_id"), "opportunityId": row.get("opportunity_id")})
         for row in task_rows:
             if end < row["due_date"] <= outlook_end and row["priority"] in {"High", "Critical"}:
-                all_future_items.append({"id": row["id"], "date": row["due_date"], "type": "deliverable", "title": row["title"], "pod": row["pod_id"], "opportunityId": row.get("opportunity_id")})
+                all_future_items.append({"id": row["id"], "sourceType": "task", "sourceId": row["id"], "date": row["due_date"], "type": "deliverable", "title": row["title"], "pod": row["pod_id"], "opportunityId": row.get("opportunity_id")})
         for row in pod_milestone_rows:
             if end < row["milestone_date"] <= outlook_end:
-                all_future_items.append({"id": row["id"], "date": row["milestone_date"], "type": "milestone", "title": row["title"], "pod": row["pod_id"], "engagementId": row.get("engagement_id"), "stakeholderId": row.get("stakeholder_id")})
+                all_future_items.append({"id": row["id"], "sourceType": "milestone", "sourceId": row["id"], "date": row["milestone_date"], "type": "milestone", "title": row["title"], "pod": row["pod_id"], "engagementId": row.get("engagement_id"), "stakeholderId": row.get("stakeholder_id")})
         for row in engagement_milestone_rows:
             if end < row["due_date"] <= outlook_end:
                 project = projects_by_id[row["engagement_id"]]
-                all_future_items.append({"id": row["id"], "date": row["due_date"], "type": "milestone", "title": f"{project['name']}: {row['title']}", "pod": project["pod_id"], "engagementId": project["id"]})
+                all_future_items.append({"id": row["id"], "sourceType": "engagement_milestone", "sourceId": row["id"], "date": row["due_date"], "type": "milestone", "title": f"{project['name']}: {row['title']}", "pod": project["pod_id"], "engagementId": project["id"]})
         for row in rolloffs:
             project = projects_by_id[row["engagement_id"]]
-            all_future_items.append({"id": f"rolloff-{row['id']}", "date": row["end_date"], "type": "staffing", "title": f"{employee_by_id[row['employee_id']]['name']} rolls off {project['name']}", "pod": project["pod_id"], "engagementId": project["id"], "employeeId": row["employee_id"]})
+            all_future_items.append({"id": f"rolloff-{row['id']}", "sourceType": "assignment", "sourceId": row["id"], "date": row["end_date"], "type": "staffing", "title": f"{employee_by_id[row['employee_id']]['name']} rolls off {project['name']}", "pod": project["pod_id"], "engagementId": project["id"], "employeeId": row["employee_id"]})
         for index in range(1, outlook_weeks + 1):
             bucket_start = start + timedelta(weeks=index)
             bucket_end = bucket_start + timedelta(days=6)
@@ -1047,13 +1141,27 @@ class ExecutiveAnalyticsStore:
 
         change_views = [{**row, "event_date": row["event_date"].isoformat()} for row in change_rows[:5]]
         historical = self.overview("quarter", anchor=start, pod=pod_filter)
+        recommendation_views = []
+        for recommendation in historical["recommendations"][:3]:
+            related = recommendation.get("relatedEntities", {})
+            engagement_id = next(iter(related.get("engagementIds", [])), None)
+            stakeholder_id = next(iter(related.get("stakeholderIds", [])), None)
+            opportunity_id = next(iter(related.get("opportunityIds", [])), None)
+            target_pod = pod_filter or "All"
+            if engagement_id in projects_by_id:
+                target_pod = projects_by_id[engagement_id]["pod_id"]
+            elif stakeholder_id in self.repository.stakeholders:
+                target_pod = self.repository.stakeholders[stakeholder_id].pod
+            elif opportunity_id in opportunity_by_id:
+                target_pod = opportunity_by_id[opportunity_id]["pod"]
+            recommendation_views.append({**recommendation, "pod": target_pod})
         return {
             "meta": {"weekStart": start.isoformat(), "weekEnd": end.isoformat(), "outlookEnd": outlook_end.isoformat(), "pod": pod_filter or "All", "generatedAt": datetime.now(timezone.utc).isoformat(), "dataSource": "normalized-sql"},
             "pulse": {"activeEmployees": len(employee_ids), "importantEvents": len(calendar), "attentionItems": len(attention), "activeProjects": len(project_views), "pipeline": pipeline, "upcomingMilestones": sum(row["type"] in {"milestone", "deadline", "deliverable"} for row in calendar)},
             "teamActivity": team_activity, "weeklyCalendar": calendar, "attentionItems": attention,
             "podSummaries": pod_summaries, "upcomingWeeks": upcoming_weeks, "projects": project_views,
             "salesSummary": {"pipeline": pipeline, "weightedPipeline": weighted_pipeline, "nearTermOpportunities": len(near_term), "upcomingProposalsDecisions": sum(row["stage"] in {"Proposal", "Negotiation"} for row in near_term), "opportunities": sales_items},
-            "changes": change_views, "recommendations": historical["recommendations"][:3],
+            "changes": change_views, "recommendations": recommendation_views,
         }
 
     def counts(self) -> dict:

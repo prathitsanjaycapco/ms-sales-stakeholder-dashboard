@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { adaptBackendMap } from "./mapAdapter";
+import { adaptBackendMap, adaptBackendStakeholder } from "./mapAdapter";
 
 
 const stakeholder = (id, overrides = {}) => ({
@@ -12,6 +12,15 @@ const stakeholder = (id, overrides = {}) => ({
 
 
 describe("canonical map adapter", () => {
+  it("preserves backend calendar dates in the user's timezone", () => {
+    const adapted = adaptBackendStakeholder(stakeholder("dated", {
+      last_meeting: "2026-08-15",
+      next_meeting: "2026-09-10",
+    }));
+    expect(adapted.lastMeeting).toBe("Aug 15, 2026");
+    expect(adapted.nextMeeting).toBe("Sep 10, 2026");
+  });
+
   it("preserves canonical IDs and prevents reporting cycles from duplicating people", () => {
     const response = {
       pod: "ISG",

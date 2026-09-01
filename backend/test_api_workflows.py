@@ -36,6 +36,34 @@ class CriticalWorkflowTests(unittest.TestCase):
         self.assertTrue(health["persistent"])
         self.assertEqual("normalized-sql", health["repository"])
 
+    def test_resourcing_metrics_reconcile_across_executive_pod_and_project_views(self):
+        resourcing = self.client.get("/api/resourcing/overview?pod=ISG").json()
+        executive = self.client.get("/api/executive/weekly?pod=ISG").json()
+        pod = self.client.get("/api/pods/ISG/dashboard").json()["view_model"]
+        self.assertEqual(resourcing["metrics"], executive["resourcing"])
+        self.assertEqual(resourcing["metrics"], pod["resourcing"])
+        self.assertEqual(resourcing["critical_items"], pod["resourcingSummary"]["criticalItems"])
+        self.assertTrue(any(item["type"].startswith("STAFFING_") for item in pod["criticalItems"]))
+        role = self.client.get("/api/resource-requirements?pod=ISG").json()[0]
+        project = self.client.get(f"/api/engagements/{role['engagement_id']}").json()
+        self.assertIn(role["id"], {item["id"] for item in project["resourcing"]["requirements"]})
+
+    def test_engagement_detail_reconciles_delivery_commercial_and_people_records(self):
+        executive = self.client.get("/api/executive/overview").json()
+        summary = next(item for item in executive["projectPortfolio"] if item["opportunityId"])
+        detail = self.client.get(f"/api/engagements/{summary['id']}")
+        self.assertEqual(200, detail.status_code)
+        project = detail.json()
+        self.assertEqual(summary["id"], project["engagement"]["id"])
+        self.assertEqual(summary["opportunityId"], project["opportunity"]["id"])
+        self.assertEqual(summary["teamSize"], len(project["team"]))
+        self.assertIn("milestones", project)
+        self.assertIn("revenue", project)
+        self.assertIn("risks", project)
+        self.assertTrue(all(item["engagement_id"] == summary["id"] for item in project["milestones"]))
+        self.assertTrue(all(item["engagement_id"] == summary["id"] for item in project["revenue"]))
+        self.assertTrue(all(item["engagement_id"] == summary["id"] for item in project["risks"]))
+
 
 if __name__ == "__main__":
     unittest.main()

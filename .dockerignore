@@ -1,0 +1,12 @@
+.git
+.github
+.playwright
+dist
+node_modules
+test-results
+playwright-report
+backend/__pycache__
+backend/*.db
+backend/uploads
+.env
+*.png

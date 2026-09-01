@@ -9,6 +9,7 @@ from sqlalchemy.engine import make_url
 from backend.canonical_schema import metadata as canonical_metadata
 from backend.executive_store import executive_metadata
 from backend.pod_store import pod_metadata
+from backend.resourcing_store import resourcing_metadata
 from backend.config import settings
 from backend.schema_integrity import attach_postgresql_integrity
 
@@ -20,7 +21,7 @@ if config.config_file_name:
     fileConfig(config.config_file_name)
 
 target_metadata = MetaData()
-for source in (canonical_metadata, pod_metadata, executive_metadata):
+for source in (canonical_metadata, pod_metadata, executive_metadata, resourcing_metadata):
     for table in source.sorted_tables:
         if table.name not in target_metadata.tables:
             table.to_metadata(target_metadata)

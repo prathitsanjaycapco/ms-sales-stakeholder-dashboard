@@ -20,15 +20,15 @@ class AccountAssistantWorkflowTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if not cls.conversation_ids:
-            return
-        with pod_engine.begin() as connection:
-            connection.execute(delete(assistant_messages).where(
-                assistant_messages.c.conversation_id.in_(cls.conversation_ids)
-            ))
-            connection.execute(delete(assistant_conversations).where(
-                assistant_conversations.c.id.in_(cls.conversation_ids)
-            ))
+        if cls.conversation_ids:
+            with pod_engine.begin() as connection:
+                connection.execute(delete(assistant_messages).where(
+                    assistant_messages.c.conversation_id.in_(cls.conversation_ids)
+                ))
+                connection.execute(delete(assistant_conversations).where(
+                    assistant_conversations.c.id.in_(cls.conversation_ids)
+                ))
+        cls.client.close()
 
     def test_reader_can_ask_grounded_question_and_open_private_history(self):
         headers = {"x-development-subject": "assistant-test-user", "x-development-roles": "Reader"}

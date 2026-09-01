@@ -1,4 +1,5 @@
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 from sqlalchemy import create_engine, text
@@ -6,6 +7,8 @@ from sqlalchemy.exc import IntegrityError
 
 from backend.schema_integrity import POSTGRESQL_FOREIGN_KEYS, POSTGRESQL_INDEXES
 from backend.config import settings
+from backend.models import StakeholderUpdate
+from backend.persistence import PersistentStakeholderRepository
 
 
 DATABASE_URL = settings.database_url
@@ -31,7 +34,7 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
                 "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()"
             )).scalars())
 
-            self.assertEqual("0008_account_assistant", revision)
+            self.assertEqual("0012_executive_provenance", revision)
         self.assertTrue({item[0] for item in POSTGRESQL_FOREIGN_KEYS}.issubset(constraints))
         self.assertTrue({item[0] for item in POSTGRESQL_INDEXES}.issubset(indexes))
 
@@ -46,6 +49,40 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
                     {"invalid": invalid_id, "division": division_id},
                 )
             transaction.rollback()
+
+    def test_resourcing_requirement_rejects_an_orphan_project(self):
+        with self.engine.connect() as connection:
+            transaction = connection.begin()
+            requirement_id = connection.execute(text("SELECT id FROM resource_requirements LIMIT 1")).scalar_one()
+            with self.assertRaises(IntegrityError):
+                connection.execute(
+                    text("UPDATE resource_requirements SET engagement_id = :invalid WHERE id = :requirement"),
+                    {"invalid": f"missing-engagement-{uuid4().hex}", "requirement": requirement_id},
+                )
+            transaction.rollback()
+
+    def test_two_repository_workers_preserve_overlapping_updates(self):
+        first = PersistentStakeholderRepository(DATABASE_URL, seed_demo_data=False, auto_create_schema=False)
+        second = PersistentStakeholderRepository(DATABASE_URL, seed_demo_data=False, auto_create_schema=False)
+        verifier = PersistentStakeholderRepository(DATABASE_URL, seed_demo_data=False, auto_create_schema=False)
+        person = first.list_stakeholders(pod="ISG")[0]
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                updates = [
+                    pool.submit(first.update_stakeholder, person.id, StakeholderUpdate(location="Concurrency Test Location")),
+                    pool.submit(second.update_stakeholder, person.id, StakeholderUpdate(title="Concurrency Test Title")),
+                ]
+                for update in updates:
+                    update.result(timeout=15)
+            verifier.refresh_if_stale()
+            current = verifier.get_stakeholder(person.id)
+            self.assertEqual("Concurrency Test Location", current.location)
+            self.assertEqual("Concurrency Test Title", current.title)
+        finally:
+            verifier.update_stakeholder(person.id, StakeholderUpdate(location=person.location, title=person.title))
+            first.engine.dispose()
+            second.engine.dispose()
+            verifier.engine.dispose()
 
 
 if __name__ == "__main__":

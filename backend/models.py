@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -7,6 +8,15 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 TeamType = Literal["Business", "Technology"]
 RelationshipStrength = Literal["Strong", "Medium", "Developing", "Unknown"]
 OpportunityStage = Literal["Discovery", "Qualification", "Proposal", "Negotiation", "Closed Won", "Closed Lost"]
+RequirementPriority = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
+RequirementStatus = Literal["DRAFT", "OPEN", "SOURCING", "PARTIALLY_FILLED", "ON_HOLD", "FILLED", "CANCELLED"]
+CandidateType = Literal["EXTERNAL", "INTERNAL_CAPCO"]
+CandidateStage = Literal["IDENTIFIED", "CAPCO_REVIEW", "SUBMITTED_TO_MS", "MS_REVIEW", "INTERVIEW_SCHEDULED", "INTERVIEWING", "OFFER", "SELECTED", "REJECTED", "WITHDRAWN"]
+InterviewStatus = Literal["SCHEDULED", "COMPLETED", "CANCELLED"]
+OfferStatus = Literal["OFFER_PENDING", "RATE_NEGOTIATION", "OFFER_ACCEPTED", "OFFER_DECLINED"]
+OnboardingStatus = Literal["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "READY_TO_START", "COMPLETE"]
+OnboardingStepStatus = Literal["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "COMPLETE", "NOT_APPLICABLE"]
+ResponsibleParty = Literal["CAPCO", "MORGAN_STANLEY"]
 
 
 class EmployeeSummary(BaseModel):
@@ -30,6 +40,7 @@ class EmployeeProfile(EmployeeSummary):
     meetings: list[dict] = Field(default_factory=list)
     owned_opportunities: list[dict] = Field(default_factory=list)
     capacity: list[dict] = Field(default_factory=list)
+    resourcing: list[dict] = Field(default_factory=list)
 
 
 class Stakeholder(BaseModel):
@@ -442,3 +453,118 @@ class CriticalItemUpdate(BaseModel):
     stakeholder_id: Optional[str] = None
     opportunity_id: Optional[str] = None
     tags: Optional[list[str]] = None
+
+
+class ResourceRequirementCreate(BaseModel):
+    pod_id: str
+    division_id: str
+    business_unit_id: str
+    engagement_id: str
+    title: str = Field(min_length=2, max_length=180)
+    role: str = Field(min_length=2, max_length=120)
+    description: str = ""
+    requested_headcount: int = Field(ge=1, le=100)
+    level: str
+    location: str
+    required_skills: list[str] = Field(default_factory=list)
+    preferred_skills: list[str] = Field(default_factory=list)
+    target_start_date: date
+    priority: RequirementPriority = "MEDIUM"
+    status: RequirementStatus = "OPEN"
+    request_owner_capco_employee_id: str
+    client_stakeholder_id: str
+
+
+class ResourceRequirementUpdate(BaseModel):
+    expected_updated_at: Optional[datetime] = None
+    title: Optional[str] = Field(default=None, min_length=2, max_length=180)
+    role: Optional[str] = Field(default=None, min_length=2, max_length=120)
+    description: Optional[str] = None
+    requested_headcount: Optional[int] = Field(default=None, ge=1, le=100)
+    level: Optional[str] = None
+    location: Optional[str] = None
+    required_skills: Optional[list[str]] = None
+    preferred_skills: Optional[list[str]] = None
+    target_start_date: Optional[date] = None
+    priority: Optional[RequirementPriority] = None
+    status: Optional[RequirementStatus] = None
+    request_owner_capco_employee_id: Optional[str] = None
+    client_stakeholder_id: Optional[str] = None
+
+
+class CandidateCreate(BaseModel):
+    resource_requirement_id: str
+    capco_employee_id: Optional[str] = None
+    candidate_type: CandidateType = "EXTERNAL"
+    first_name: str = Field(min_length=1, max_length=90)
+    last_name: str = Field(min_length=1, max_length=90)
+    email: Optional[str] = None
+    level: str
+    location: str
+    skills: list[str] = Field(default_factory=list)
+    stage: CandidateStage = "IDENTIFIED"
+    capco_reviewer_id: str
+    ms_reviewer_stakeholder_id: Optional[str] = None
+    expected_start_date: Optional[date] = None
+    match_score: Optional[int] = Field(default=None, ge=0, le=100)
+
+
+class CandidateUpdate(BaseModel):
+    expected_updated_at: Optional[datetime] = None
+    stage: Optional[CandidateStage] = None
+    expected_start_date: Optional[date] = None
+    capco_reviewer_id: Optional[str] = None
+    ms_reviewer_stakeholder_id: Optional[str] = None
+    note: Optional[str] = None
+
+
+class CandidateInterviewCreate(BaseModel):
+    interview_round: int = Field(ge=1, le=20)
+    scheduled_at: datetime
+    interview_type: str
+    ms_interviewer_stakeholder_ids: list[str] = Field(default_factory=list)
+    capco_attendee_ids: list[str] = Field(default_factory=list)
+    status: InterviewStatus = "SCHEDULED"
+    feedback: str = ""
+    recommendation: Optional[str] = None
+
+
+class CandidateInterviewUpdate(BaseModel):
+    expected_updated_at: Optional[datetime] = None
+    scheduled_at: Optional[datetime] = None
+    status: Optional[InterviewStatus] = None
+    feedback: Optional[str] = None
+    recommendation: Optional[str] = None
+
+
+class OfferCreate(BaseModel):
+    proposed_rate: Optional[Decimal] = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+    agreed_rate: Optional[Decimal] = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+    rate_currency: str = "USD"
+    offer_status: OfferStatus = "OFFER_PENDING"
+    notes: str = ""
+
+
+class OfferUpdate(BaseModel):
+    expected_updated_at: Optional[datetime] = None
+    proposed_rate: Optional[Decimal] = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+    agreed_rate: Optional[Decimal] = Field(default=None, ge=0, max_digits=18, decimal_places=2)
+    offer_status: Optional[OfferStatus] = None
+    notes: Optional[str] = None
+
+
+class OnboardingRecordUpdate(BaseModel):
+    expected_updated_at: Optional[datetime] = None
+    expected_start_date: Optional[date] = None
+    actual_start_date: Optional[date] = None
+    overall_status: Optional[OnboardingStatus] = None
+
+
+class OnboardingStepUpdate(BaseModel):
+    expected_updated_at: Optional[datetime] = None
+    status: Optional[OnboardingStepStatus] = None
+    responsible_party: Optional[ResponsibleParty] = None
+    owner_id: Optional[str] = None
+    target_completion_date: Optional[date] = None
+    blocker_reason: Optional[str] = None
+    notes: Optional[str] = None

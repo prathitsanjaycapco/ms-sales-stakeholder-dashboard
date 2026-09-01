@@ -1508,6 +1508,11 @@ class PodOperatingStore:
         opportunity_views.sort(key=lambda item: item["value"] * item["probability"], reverse=True)
 
         task_views = [self._task_view(row, stakeholders, opportunities_by_id) for row in task_rows]
+        period_task_views = [
+            item for item in task_views
+            if item.get("due") and start.isoformat() <= item["due"] < end.isoformat()
+        ]
+        open_task_views = [item for item in task_views if item.get("status") != "Done"]
         critical_views = []
         for row in critical_rows:
             person = stakeholders.get(row["stakeholder_id"])
@@ -1531,9 +1536,13 @@ class PodOperatingStore:
             latest = latest_meetings.get(person.id)
             last_meeting = latest["date"] if latest else None
             days = max(0, (today - last_meeting).days) if last_meeting else None
-            needs_attention = days is None or days >= 30
-            importance = "High" if days is None or days >= 60 else "Medium" if days >= 30 else "Low"
-            trend = "No meeting" if days is None else "Weakening" if days >= 60 else "Watch" if days >= 30 else "Current"
+            strategic = person.is_buyer or person.is_budget_holder or any(
+                tag.casefold() == "strategic" for tag in person.tags
+            )
+            cadence_days = 30 if person.is_budget_holder or person.is_buyer else 90
+            needs_attention = strategic and (days is None or days >= cadence_days)
+            importance = "High" if days is not None and days >= cadence_days * 2 else "Medium" if needs_attention else "Low"
+            trend = "Uncovered" if days is None else "Weakening" if days >= cadence_days * 2 else "Watch" if days >= cadence_days else "Current"
             source_signal = signal_by_stakeholder.get(person.id)
             signal = (
                 "No linked client meeting is recorded."
@@ -1557,6 +1566,9 @@ class PodOperatingStore:
                 "riskScore": days if days is not None else 10000,
                 "trend": trend,
                 "needsAttention": needs_attention,
+                "coverageStatus": "Uncovered" if days is None else "Overdue" if days >= cadence_days else "Current",
+                "cadenceDays": cadence_days,
+                "strategic": strategic,
                 "recencySource": "Latest persisted client meeting",
                 "tags": self._tags(
                     person.tags,
@@ -1593,6 +1605,13 @@ class PodOperatingStore:
             "opportunities": opportunity_views,
             "criticalItems": critical_views,
             "tasks": task_views,
+            "periodTasks": period_task_views,
+            "openTasksAsOf": open_task_views,
+            "periodCriticalItems": [
+                item for item in critical_views
+                if item.get("due") and start.isoformat() <= item["due"] < end.isoformat()
+            ],
+            "openCriticalItemsAsOf": critical_views,
             "relationships": relationships,
             "milestones": milestones,
             "focus": list(focus_row["content"]) if focus_row else [],

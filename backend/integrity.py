@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import and_, func, select
 
@@ -136,12 +136,29 @@ def reconcile_account(repository, pod_store, executive_store, anchor: date | Non
     start = date(anchor.year, ((anchor.month - 1) // 3) * 3 + 1, 1)
     end_month = start.month + 3
     end = date(start.year + (end_month > 12), 1 if end_month > 12 else end_month, 1)
+    period_end = end - timedelta(days=1)
     with executive_store.engine.connect() as connection:
         capacity_rows = connection.execute(select(employee_capacity).where(and_(employee_capacity.c.period_start < end, employee_capacity.c.period_end >= start))).mappings().all()
-        assignment_rows = connection.execute(select(engagement_assignments).where(and_(engagement_assignments.c.start_date < end, engagement_assignments.c.end_date >= start))).mappings().all()
-    capacity_by_person = {row["employee_id"]: float(row["available_hours"]) for row in capacity_rows}
+        assignment_rows = connection.execute(select(engagement_assignments).join(
+            engagements, engagements.c.id == engagement_assignments.c.engagement_id,
+        ).where(and_(
+            func.lower(engagements.c.status) == "active",
+            engagement_assignments.c.start_date < end,
+            engagement_assignments.c.end_date >= start,
+        ))).mappings().all()
+    capacity_by_person = {}
+    for row in capacity_rows:
+        capacity_days = executive_store._working_days(row["period_start"], row["period_end"])
+        overlap_days = executive_store._overlap_working_days(start, period_end, row["period_start"], row["period_end"])
+        capacity_by_person[row["employee_id"]] = capacity_by_person.get(row["employee_id"], 0) + float(row["available_hours"]) * overlap_days / capacity_days
     available = sum(capacity_by_person.values())
-    billable = sum(capacity_by_person.get(row["employee_id"], 0) * float(row["allocation_percent"]) / 100 for row in assignment_rows if row["billable"])
+    period_days = executive_store._working_days(start, period_end)
+    billable = sum(
+        capacity_by_person.get(row["employee_id"], 0)
+        * executive_store._overlap_working_days(start, period_end, row["start_date"], row["end_date"]) / period_days
+        * float(row["allocation_percent"]) / 100
+        for row in assignment_rows if row["billable"]
+    )
     expected_utilization = billable / available if available else None
     actual_utilization = executive["workforce"]["utilization"]
     add("Executive utilization equals billable allocation ÷ available capacity", round(expected_utilization, 8) if expected_utilization is not None else None, round(actual_utilization, 8) if actual_utilization is not None else None, scope="workforce", evidence=[row["id"] for row in assignment_rows])

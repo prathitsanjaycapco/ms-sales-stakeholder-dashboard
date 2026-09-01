@@ -91,7 +91,7 @@ class Settings:
             database_url=database_url,
             repository_backend=os.getenv("STAKEHOLDER_REPOSITORY", "database").strip().lower(),
             require_database=_bool("REQUIRE_DATABASE", environment == "production"),
-            seed_demo_data=_bool("SEED_DEMO_DATA", environment != "production"),
+            seed_demo_data=_bool("SEED_DEMO_DATA", False),
             auto_create_schema=_bool("AUTO_CREATE_SCHEMA", environment != "production"),
             cors_origins=origins,
             upload_root=upload_root,

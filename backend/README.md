@@ -32,7 +32,7 @@ python -m alembic -c alembic.ini upgrade head
 python -m uvicorn backend.main:app --reload --port 8000
 ```
 
-Development defaults to `backend/stakeholder-dev.db` only when `DATABASE_URL` is absent. Demo records are enabled by default in development so the product remains usable locally. Set `SEED_DEMO_DATA=false` to validate an empty or externally loaded database.
+Development defaults to `backend/stakeholder-dev.db` only when `DATABASE_URL` is absent. Startup never seeds business data. Run `python -m backend.manage seed-demo` explicitly for a disposable nonproduction dataset; production configuration rejects that command.
 
 The backend loads the workspace-root `.env` itself; VS Code terminal environment injection is not required. `.env` is gitignored. URL-encode special characters in database passwords.
 
@@ -59,7 +59,7 @@ AI_MAX_SOURCES=8
 
 Production startup fails when PostgreSQL is unavailable, when the canonical schema has not been migrated, when the database is empty, when an in-memory repository is selected, when authenticated-proxy configuration is absent, when durable upload storage is not explicitly configured, or when localhost CORS origins are configured. Startup never creates schema or inserts demo data in this mode.
 
-The trusted identity proxy must remove client-supplied identity headers and set `X-Auth-Proxy-Secret`, `X-User-Subject`, `X-User-Roles`, and optionally `X-User-Employee-ID`. Supported roles are Reader, Editor, Account Manager, and Account Admin. Mutation responses include durable audit and request IDs.
+The trusted identity proxy must remove client-supplied identity headers and set `X-Auth-Proxy-Secret`, `X-User-Subject`, `X-User-Roles`, `X-User-Accounts`, and optionally `X-User-Pods` and `X-User-Employee-ID`. Supported roles are Viewer, Editor, Account Manager, Partner, and Account Admin; Reader is a temporary Viewer alias. Unknown roles and out-of-scope account/pod claims are rejected. Mutation responses include durable audit and request IDs.
 
 ## Migrations
 
@@ -87,11 +87,13 @@ The cleanup migration refuses to remove the legacy snapshot unless canonical sta
 - Revenue: sum of dated `revenue_records.amount` for active engagements in the selected period.
 - Weighted pipeline: sum of canonical active opportunity value multiplied by persisted probability.
 - Utilization: billable allocated hours divided by available capacity hours for employees with capacity records.
-- Delivery on-time rate: completed or on-track engagement milestones divided by milestones due in the selected period.
+- Delivery on-time rate: milestones actually completed on or before their due dates divided by milestones due in the selected period; schedule health is reported separately.
 - Capacity gap: qualified available FTE minus open 60-day resource demand.
 - Relationship attention: strategic stakeholder contact recency plus persisted relationship strength; unknown data is not converted to zero.
 
 Definitions and inputs are returned in Executive and Pod responses. Recommendations are deterministic findings with supporting metrics, source periods, related entity IDs, suggested actions, and confidence statements.
+
+Executive delivery, revenue, milestone, capacity, and allocation feeds use the governed, idempotent upsert described in [`docs/EXECUTIVE_IMPORT.md`](../docs/EXECUTIVE_IMPORT.md). Validate with `import-executive --dry-run` before writing; the engagement feed records source identity and synchronization evidence used by the Trust & operations screen.
 
 ## Validation
 

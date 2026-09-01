@@ -40,6 +40,7 @@ function RecordSummary({ icon: Icon, title, description, count }) {
 }
 
 export default function DataManagement({ pod, initialSection = "Critical items", focus = null, canWrite = true }) {
+  const effectivePod = pod === "All" ? null : pod;
   const [section, setSection] = useState(initialSection);
   const [people, setPeople] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -63,13 +64,14 @@ export default function DataManagement({ pod, initialSection = "Critical items",
 
   const load = async () => {
     setLoading(true); setError("");
+    if (!effectivePod) { setPeople([]); setEmployees([]); setMeetings([]); setOpportunities([]); setCriticalItems([]); setLoading(false); return; }
     try {
       const [stakeholderRows, employeeRows, meetingRows, opportunityRows, dashboard] = await Promise.all([
-        api.getStakeholders({ pod }),
+        api.getStakeholders({ pod: effectivePod }),
         api.getEmployees(),
-        api.getPodMeetingOptions(pod),
+        api.getPodMeetingOptions(effectivePod),
         api.getOpportunities(),
-        api.getPodDashboard(pod, "week", weekStartKey()),
+        api.getPodDashboard(effectivePod, "week", weekStartKey()),
       ]);
       const stakeholderIds = new Set(stakeholderRows.map(item => item.id));
       setPeople(stakeholderRows.sort((a, b) => a.name.localeCompare(b.name)));
@@ -94,23 +96,6 @@ export default function DataManagement({ pod, initialSection = "Critical items",
     load();
   }, [pod]);
   useEffect(() => {
-    if (!people.length) return;
-    const firstId = people[0].id;
-    setCritical(value => ({ ...value, stakeholder_id: value.stakeholder_id || firstId }));
-    setMeeting(value => ({ ...value, stakeholder_id: value.stakeholder_id || firstId }));
-    setPipeline(value => ({ ...value, stakeholder_id: value.stakeholder_id || firstId }));
-    setDocument(value => ({ ...value, target_id: value.target_id || firstId }));
-  }, [people]);
-  useEffect(() => {
-    if (!employees.length) return;
-    const primary = employees[0];
-    const secondary = employees[1] || primary;
-    setCritical(value => ({ ...value, capco_owner_employee_id: value.capco_owner_employee_id || primary.id, capco_owner: value.capco_owner || primary.name }));
-    setMeeting(value => ({ ...value, organizer_employee_id: value.organizer_employee_id || primary.id, organizer: value.organizer || primary.name, capco_attendee_ids: value.capco_attendee_ids.length ? value.capco_attendee_ids : [primary.id, secondary.id] }));
-    setPipeline(value => ({ ...value, owner_employee_id: value.owner_employee_id || primary.id, owner: value.owner || primary.name }));
-    setDocument(value => ({ ...value, owner_employee_id: value.owner_employee_id || primary.id, owner: value.owner || primary.name }));
-  }, [employees]);
-  useEffect(() => {
     if (!notice) return undefined;
     const timer = setTimeout(() => setNotice(""), 3200);
     return () => clearTimeout(timer);
@@ -127,12 +112,13 @@ export default function DataManagement({ pod, initialSection = "Critical items",
 
   const podOpportunities = useMemo(() => [...opportunities].sort((a, b) => b.estimated_value - a.estimated_value), [opportunities]);
   const submit = async (operation, message, after) => {
+    if (!canWrite) { setError("Your current role cannot change account records."); return; }
     setSaving(true); setError("");
     try { await operation(); if (after) await after(); await load(); setNotice(message); }
     catch (requestError) { setError(requestError.message || "The record could not be saved."); }
     finally { setSaving(false); }
   };
-  const changeDocumentTarget = (targetType) => { setEditingDocumentId(""); setDocument(value => ({ ...value, target_type: targetType, target_id: targetType === "stakeholder" ? people[0]?.id || "" : meetings[0]?.id || "", document_type: targetType === "meeting" ? "Meeting Brief" : "Account Plan" })); };
+  const changeDocumentTarget = (targetType) => { setEditingDocumentId(""); setDocument(value => ({ ...value, target_type: targetType, target_id: "", document_type: targetType === "meeting" ? "Meeting Brief" : "Account Plan" })); };
   const chooseCritical = (id) => {
     setEditingCriticalId(id);
     const item = criticalItems.find(value => value.id === id);
@@ -149,7 +135,7 @@ export default function DataManagement({ pod, initialSection = "Critical items",
     setEditingOpportunityId(id);
     const item = opportunities.find(value => value.id === id);
     if (!item) { setPipeline(value => ({ ...value, name: "", description: "", estimated_value: "" })); return; }
-    setPipeline({ name: item.name, description: item.description || "", estimated_value: item.estimated_value, probability: item.probability, stage: item.stage, stakeholder_id: item.stakeholder_ids[0] || people[0]?.id || "", owner: item.owner, owner_employee_id: item.owner_employee_id || "", target_close_date: item.target_close_date || "", tags: (item.tags || []).join(", ") });
+    setPipeline({ name: item.name, description: item.description || "", estimated_value: item.estimated_value, probability: item.probability, stage: item.stage, stakeholder_id: item.stakeholder_ids[0] || "", owner: item.owner, owner_employee_id: item.owner_employee_id || "", target_close_date: item.target_close_date || "", tags: (item.tags || []).join(", ") });
   };
   useEffect(() => {
     if (!focus?.id) return;
@@ -171,8 +157,11 @@ export default function DataManagement({ pod, initialSection = "Critical items",
     ["Critical items", AlertTriangle], ["Meetings", CalendarDays], ["Commercial pipeline", BriefcaseBusiness], ["Documents", FileUp],
   ];
 
+  if (!effectivePod) return <div className="data-management"><div className="map-data-state"><Database/><h2>Select a pod to administer account data</h2><p>All-pod scope is read-only. Choose ISG, Wealth Management, or MSIM before creating or editing records.</p></div></div>;
+
+  const guidanceEmpty = section === "Critical items" ? criticalItems.length === 0 : section === "Meetings" ? meetings.length === 0 : section === "Commercial pipeline" ? podOpportunities.length === 0 : false;
   return <div className="data-management">
-    <header className="data-management-head"><div><span>{pod.toUpperCase()} DATA ADMINISTRATION</span><h1>Manage account information</h1><p>Add operational records and documents to the same database used by Pod View and stakeholder profiles.</p></div><div className="database-chip"><Database/><span><b>Canonical data pool</b><small>Changes appear throughout the account cockpit</small></span></div></header>
+    <header className="data-management-head"><div><span>{effectivePod.toUpperCase()} DATA ADMINISTRATION</span><h1>Manage account information</h1><p>Add operational records and documents to the same database used by Pod View and stakeholder profiles.</p></div><div className="database-chip"><Database/><span><b>Canonical data pool</b><small>Changes appear throughout the account cockpit</small></span></div></header>
     <div className="data-summary">
       <RecordSummary icon={UsersRound} title="Stakeholders" description="Available linking records" count={people.length}/>
       <RecordSummary icon={CalendarDays} title="Meetings" description="Calendar and profile records" count={meetings.length}/>
@@ -183,7 +172,7 @@ export default function DataManagement({ pod, initialSection = "Critical items",
     <main className="data-management-body">
       <section className={`data-entry-card ${canWrite ? "" : "read-only"}`}>
         {!canWrite && <div className="data-error"><ShieldCheck/><span><b>Read-only access</b><small>Your current role can view these records but cannot change them.</small></span></div>}
-        {section === "Critical items" && <form onSubmit={event => { event.preventDefault(); const payload = { ...critical, opportunity_id: critical.opportunity_id || null, tags: parseTags(critical.tags) }; submit(() => editingCriticalId ? api.updateCriticalItem(pod, editingCriticalId, payload) : api.createCriticalItem(pod, payload), editingCriticalId ? "Critical item updated throughout Pod View" : "Critical item added to Pod View", () => { setEditingCriticalId(""); setCritical(value => ({ ...value, title: "", description: "", tags: "" })); }); }}>
+        {section === "Critical items" && <form className={!canWrite ? "read-only-form" : ""} aria-disabled={!canWrite} onSubmit={event => { event.preventDefault(); const payload = { ...critical, opportunity_id: critical.opportunity_id || null, tags: parseTags(critical.tags) }; submit(() => editingCriticalId ? api.updateCriticalItem(effectivePod, editingCriticalId, payload) : api.createCriticalItem(effectivePod, payload), editingCriticalId ? "Critical item updated throughout Pod View" : "Critical item added to Pod View", () => { setEditingCriticalId(""); setCritical(value => ({ ...value, title: "", description: "", tags: "" })); }); }}>
           <div className="data-form-title"><AlertTriangle/><div><h2>{editingCriticalId ? "Edit critical item" : "Add critical item"}</h2><p>{editingCriticalId ? "Updates the existing linked risk or decision record." : "Creates an active risk or decision item in the Pod View."}</p></div></div>
           <Field label="Create or edit"><select value={editingCriticalId} onChange={e => chooseCritical(e.target.value)}><option value="">Create a new critical item</option>{criticalItems.map(item => <option key={item.id} value={item.id}>Edit: {item.title}</option>)}</select></Field>
           <Field label="Title"><input required value={critical.title} onChange={e => setCritical({ ...critical, title: e.target.value })}/></Field>
@@ -192,10 +181,10 @@ export default function DataManagement({ pod, initialSection = "Critical items",
           <div className="data-form-grid"><Field label="Morgan Stanley person"><select required value={critical.stakeholder_id} onChange={e => setCritical({ ...critical, stakeholder_id: e.target.value })}>{people.map(person => <option key={person.id} value={person.id}>{person.name} — {person.title}</option>)}</select></Field><Field label="Capco relationship owner"><select required value={critical.capco_owner_employee_id} onChange={e => { const employee = employees.find(item => item.id === e.target.value); setCritical({ ...critical, capco_owner_employee_id: e.target.value, capco_owner: employee?.name || "" }); }}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name} — {employee.role}</option>)}</select></Field></div>
           <Field label="Linked opportunity" hint="Optional"><select value={critical.opportunity_id} onChange={e => setCritical({ ...critical, opportunity_id: e.target.value })}><option value="">No linked opportunity</option>{podOpportunities.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field>
           <Field label="Tags" hint="Comma-separated; used by the Pod View account filter"><input value={critical.tags} onChange={e => setCritical({ ...critical, tags: e.target.value })} placeholder="AI, Data, Risk"/></Field>
-          <button className="data-submit" disabled={saving || loading}><AlertTriangle/>{saving ? "Saving…" : editingCriticalId ? "Save critical item" : "Add critical item"}</button>
+          <div className="data-form-actions">{editingCriticalId && canWrite && <button type="button" className="data-cancel" onClick={() => chooseCritical("")}>Cancel editing</button>}<button className="data-submit" disabled={!canWrite || saving || loading}><AlertTriangle/>{saving ? "Saving…" : editingCriticalId ? "Save critical item" : "Add critical item"}</button></div>
         </form>}
 
-        {section === "Meetings" && <form onSubmit={event => { event.preventDefault(); const payload = { ...meeting, meeting_date: new Date(meeting.meeting_date).toISOString(), duration_minutes: Number(meeting.duration_minutes), stakeholder_ids: [meeting.stakeholder_id], capco_attendees: meeting.capco_attendee_ids.map(id => employees.find(item => item.id === id)?.name).filter(Boolean), next_steps: meeting.next_steps.split("\n").map(value => value.trim()).filter(Boolean), opportunity_id: meeting.opportunity_id || null, opportunity_ids: meeting.opportunity_id ? [meeting.opportunity_id] : [], tags: parseTags(meeting.tags) }; submit(() => editingMeetingId ? api.updatePodMeeting(pod, editingMeetingId, payload) : api.createPodMeeting(pod, payload), editingMeetingId ? "Meeting updated in the calendar and linked profile" : "Meeting added to the calendar and stakeholder profile", () => { setEditingMeetingId(""); setMeeting(value => ({ ...value, subject: "", summary: "", next_steps: "", tags: "" })); }); }}>
+        {section === "Meetings" && <form className={!canWrite ? "read-only-form" : ""} aria-disabled={!canWrite} onSubmit={event => { event.preventDefault(); const payload = { ...meeting, meeting_date: new Date(meeting.meeting_date).toISOString(), duration_minutes: Number(meeting.duration_minutes), stakeholder_ids: [meeting.stakeholder_id], capco_attendees: meeting.capco_attendee_ids.map(id => employees.find(item => item.id === id)?.name).filter(Boolean), next_steps: meeting.next_steps.split("\n").map(value => value.trim()).filter(Boolean), opportunity_id: meeting.opportunity_id || null, opportunity_ids: meeting.opportunity_id ? [meeting.opportunity_id] : [], tags: parseTags(meeting.tags) }; submit(() => editingMeetingId ? api.updatePodMeeting(effectivePod, editingMeetingId, payload) : api.createPodMeeting(effectivePod, payload), editingMeetingId ? "Meeting updated in the calendar and linked profile" : "Meeting added to the calendar and stakeholder profile", () => { setEditingMeetingId(""); setMeeting(value => ({ ...value, subject: "", summary: "", next_steps: "", tags: "" })); }); }}>
           <div className="data-form-title"><CalendarDays/><div><h2>{editingMeetingId ? "Edit meeting" : "Add meeting"}</h2><p>{editingMeetingId ? "Updates its calendar event and canonical profile history where linked." : "Writes one canonical meeting record and its linked Pod calendar event."}</p></div></div>
           <Field label="Create or edit"><select value={editingMeetingId} onChange={e => chooseMeeting(e.target.value)}><option value="">Create a new meeting</option>{meetings.map(item => <option key={`${item.id}-${item.event_id}`} value={item.id}>Edit: {new Date(item.meeting_date).toLocaleDateString()} — {item.title}</option>)}</select></Field>
           <Field label="Meeting subject"><input required value={meeting.subject} onChange={e => setMeeting({ ...meeting, subject: e.target.value })}/></Field>
@@ -207,10 +196,10 @@ export default function DataManagement({ pod, initialSection = "Critical items",
           <Field label="Next steps" hint="One per line"><textarea rows="3" value={meeting.next_steps} onChange={e => setMeeting({ ...meeting, next_steps: e.target.value })}/></Field>
           <Field label="Tags" hint="Comma-separated; inherited by calendar and prep views"><input value={meeting.tags} onChange={e => setMeeting({ ...meeting, tags: e.target.value })} placeholder="AI, Data, Risk"/></Field>
           <label className="data-check"><input type="checkbox" checked={meeting.prep_required} onChange={e => setMeeting({ ...meeting, prep_required: e.target.checked })}/> Meeting preparation required</label>
-          <button className="data-submit" disabled={saving || loading}><CalendarDays/>{saving ? "Saving…" : editingMeetingId ? "Save meeting" : "Add meeting"}</button>
+          <div className="data-form-actions">{editingMeetingId && canWrite && <button type="button" className="data-cancel" onClick={() => chooseMeeting("")}>Cancel editing</button>}<button className="data-submit" disabled={!canWrite || saving || loading}><CalendarDays/>{saving ? "Saving…" : editingMeetingId ? "Save meeting" : "Add meeting"}</button></div>
         </form>}
 
-        {section === "Commercial pipeline" && <form onSubmit={event => { event.preventDefault(); const payload = { ...pipeline, estimated_value: Number(pipeline.estimated_value), probability: Number(pipeline.probability), stakeholder_ids: [pipeline.stakeholder_id], target_close_date: pipeline.target_close_date || null, tags: parseTags(pipeline.tags) }; submit(() => editingOpportunityId ? api.updateOpportunity(editingOpportunityId, payload) : api.createOpportunity(payload), editingOpportunityId ? "Commercial opportunity updated throughout Pod View" : "Commercial opportunity added to Pod View", () => { setEditingOpportunityId(""); setPipeline(value => ({ ...value, name: "", description: "", estimated_value: "", tags: "" })); }); }}>
+        {section === "Commercial pipeline" && <form className={!canWrite ? "read-only-form" : ""} aria-disabled={!canWrite} onSubmit={event => { event.preventDefault(); const payload = { ...pipeline, estimated_value: Number(pipeline.estimated_value), probability: Number(pipeline.probability), stakeholder_ids: [pipeline.stakeholder_id], target_close_date: pipeline.target_close_date || null, tags: parseTags(pipeline.tags) }; submit(() => editingOpportunityId ? api.updateOpportunity(editingOpportunityId, payload) : api.createOpportunity(payload), editingOpportunityId ? "Commercial opportunity updated throughout Pod View" : "Commercial opportunity added to Pod View", () => { setEditingOpportunityId(""); setPipeline(value => ({ ...value, name: "", description: "", estimated_value: "", tags: "" })); }); }}>
           <div className="data-form-title"><BriefcaseBusiness/><div><h2>{editingOpportunityId ? "Edit commercial pipeline item" : "Add commercial pipeline item"}</h2><p>{editingOpportunityId ? "Updates the existing opportunity and every linked commercial view." : "Creates an opportunity linked to an accountable Morgan Stanley stakeholder."}</p></div></div>
           <Field label="Create or edit"><select value={editingOpportunityId} onChange={e => chooseOpportunity(e.target.value)}><option value="">Create a new pipeline item</option>{podOpportunities.map(item => <option key={item.id} value={item.id}>Edit: {item.name}</option>)}</select></Field>
           <Field label="Opportunity name"><input required value={pipeline.name} onChange={e => setPipeline({ ...pipeline, name: e.target.value })}/></Field>
@@ -219,10 +208,10 @@ export default function DataManagement({ pod, initialSection = "Critical items",
           <div className="data-form-grid"><Field label="Morgan Stanley sponsor"><select required value={pipeline.stakeholder_id} onChange={e => setPipeline({ ...pipeline, stakeholder_id: e.target.value })}>{people.map(person => <option key={person.id} value={person.id}>{person.name} — {person.title}</option>)}</select></Field><Field label="Capco owner"><select required value={pipeline.owner_employee_id} onChange={e => { const employee = employees.find(item => item.id === e.target.value); setPipeline({ ...pipeline, owner_employee_id: e.target.value, owner: employee?.name || "" }); }}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name} — {employee.role}</option>)}</select></Field></div>
           <Field label="Target close date"><input type="date" value={pipeline.target_close_date} onChange={e => setPipeline({ ...pipeline, target_close_date: e.target.value })}/></Field>
           <Field label="Tags" hint="Comma-separated; shared with linked stakeholders and Pod View"><input value={pipeline.tags} onChange={e => setPipeline({ ...pipeline, tags: e.target.value })} placeholder="AI, Data, Risk"/></Field>
-          <button className="data-submit" disabled={saving || loading}><BriefcaseBusiness/>{saving ? "Saving…" : editingOpportunityId ? "Save pipeline item" : "Add pipeline item"}</button>
+          <div className="data-form-actions">{editingOpportunityId && canWrite && <button type="button" className="data-cancel" onClick={() => chooseOpportunity("")}>Cancel editing</button>}<button className="data-submit" disabled={!canWrite || saving || loading}><BriefcaseBusiness/>{saving ? "Saving…" : editingOpportunityId ? "Save pipeline item" : "Add pipeline item"}</button></div>
         </form>}
 
-        {section === "Documents" && <form key={fileInputKey} onSubmit={event => { event.preventDefault(); const metadata = { title: document.title, sharepoint_url: document.sharepoint_url || null, document_type: document.document_type, description: document.description, owner: document.owner, owner_employee_id: document.owner_employee_id || null, tags: editingDocumentId ? parseTags(document.tags) : document.tags }; const uploader = document.target_type === "stakeholder" ? api.uploadStakeholderDocument : api.uploadMeetingDocument; submit(() => editingDocumentId ? api.updateDocument(editingDocumentId, metadata) : uploader(document.target_id, document.file, metadata), editingDocumentId ? "Document metadata, tags, and SharePoint link updated" : "Local document uploaded and linked", async () => { setEditingDocumentId(""); setDocument(value => ({ ...value, title: "", file: null, sharepoint_url: "", description: "", tags: "" })); setFileInputKey(value => value + 1); await loadTargetDocuments(); }); }}>
+        {section === "Documents" && <form key={fileInputKey} className={!canWrite ? "read-only-form" : ""} aria-disabled={!canWrite} onSubmit={event => { event.preventDefault(); const metadata = { title: document.title, sharepoint_url: document.sharepoint_url || null, document_type: document.document_type, description: document.description, owner: document.owner, owner_employee_id: document.owner_employee_id || null, tags: editingDocumentId ? parseTags(document.tags) : document.tags }; const uploader = document.target_type === "stakeholder" ? api.uploadStakeholderDocument : api.uploadMeetingDocument; submit(() => editingDocumentId ? api.updateDocument(editingDocumentId, metadata) : uploader(document.target_id, document.file, metadata), editingDocumentId ? "Document metadata, tags, and SharePoint link updated" : "Local document uploaded and linked", async () => { setEditingDocumentId(""); setDocument(value => ({ ...value, title: "", file: null, sharepoint_url: "", description: "", tags: "" })); setFileInputKey(value => value + 1); await loadTargetDocuments(); }); }}>
           <div className="data-form-title"><FileUp/><div><h2>{editingDocumentId ? "Edit document" : "Upload and link document"}</h2><p>{editingDocumentId ? "Updates document metadata while preserving the stored local copy." : "Stores a downloadable local copy and optionally links the SharePoint version."}</p></div></div>
           <div className="target-toggle"><button disabled={!!editingDocumentId} type="button" className={document.target_type === "stakeholder" ? "active" : ""} onClick={() => changeDocumentTarget("stakeholder")}>Stakeholder</button><button disabled={!!editingDocumentId} type="button" className={document.target_type === "meeting" ? "active" : ""} onClick={() => changeDocumentTarget("meeting")}>Meeting</button></div>
           <Field label={`Linked ${document.target_type}`}><select disabled={!!editingDocumentId} required value={document.target_id} onChange={e => { setEditingDocumentId(""); setDocument({ ...document, target_id: e.target.value }); }}>{document.target_type === "stakeholder" ? people.map(person => <option key={person.id} value={person.id}>{person.name} — {person.title}</option>) : meetings.map(item => <option key={`${item.id}-${item.event_id}`} value={item.id}>{new Date(item.meeting_date).toLocaleDateString()} — {item.title}</option>)}</select></Field>
@@ -233,19 +222,19 @@ export default function DataManagement({ pod, initialSection = "Critical items",
           <div className="data-form-grid"><Field label="Document type"><select value={document.document_type} onChange={e => setDocument({ ...document, document_type: e.target.value })}>{documentTypes.map(value => <option key={value}>{value}</option>)}</select></Field><Field label="Owner"><select required value={document.owner_employee_id} onChange={e => { const employee = employees.find(item => item.id === e.target.value); setDocument({ ...document, owner_employee_id: e.target.value, owner: employee?.name || "" }); }}>{employees.map(employee => <option key={employee.id} value={employee.id}>{employee.name} — {employee.role}</option>)}</select></Field></div>
           <Field label="Tags" hint="Comma-separated; searchable operating context"><input value={document.tags} onChange={e => setDocument({ ...document, tags: e.target.value })} placeholder="AI, Data, Risk"/></Field>
           <Field label="Description"><textarea rows="3" value={document.description} onChange={e => setDocument({ ...document, description: e.target.value })}/></Field>
-          <button className="data-submit" disabled={saving || loading || !document.target_id || (!editingDocumentId && !document.file)}><FileUp/>{saving ? "Saving…" : editingDocumentId ? "Save document" : "Upload document"}</button>
+          <div className="data-form-actions">{editingDocumentId && canWrite && <button type="button" className="data-cancel" onClick={() => chooseDocument("")}>Cancel editing</button>}<button className="data-submit" disabled={!canWrite || saving || loading || !document.target_id || (!editingDocumentId && !document.file)}><FileUp/>{saving ? "Saving…" : editingDocumentId ? "Save document" : "Upload document"}</button></div>
         </form>}
-        {error && <div className="data-error"><AlertTriangle/><span><b>Could not save</b><small>{error}</small></span></div>}
+        {error && <div className="data-error" role="alert"><AlertTriangle/><span><b>{canWrite ? "Could not save" : "Read-only access"}</b><small>{error}</small></span></div>}
       </section>
 
-      <aside className="data-guidance">
+      {!guidanceEmpty && <aside className="data-guidance">
         <div><ShieldCheck/><h2>One linked data pool</h2><p>Every record managed here uses canonical stakeholder IDs, so profile drawers, calendar meetings, critical items, and pipeline cards stay connected.</p></div>
-        {section === "Critical items" && <><h3>Currently active</h3><div className="data-record-list editable-record-list">{criticalItems.slice(0,8).map(item => <article key={item.id}><span className={item.severity.toLowerCase()}>{item.severity}</span><div><b>{item.title}</b><small>{item.msOwner} · {item.capcoOwner}</small></div><button onClick={() => chooseCritical(item.id)}>Edit</button></article>)}</div></>}
-        {section === "Meetings" && <><h3>Recent meeting records</h3><div className="data-record-list editable-record-list">{meetings.slice(0,8).map(item => <article key={`${item.id}-${item.event_id}`}><CalendarDays/><div><b>{item.title}</b><small>{new Date(item.meeting_date).toLocaleString()}</small></div><button onClick={() => chooseMeeting(item.id)}>Edit</button></article>)}</div></>}
-        {section === "Commercial pipeline" && <><h3>Current pipeline</h3><div className="data-record-list editable-record-list">{podOpportunities.slice(0,8).map(item => <article key={item.id}><BriefcaseBusiness/><div><b>{item.name}</b><small>{item.stage} · {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(item.estimated_value)}</small></div><button onClick={() => chooseOpportunity(item.id)}>Edit</button></article>)}</div></>}
-        {section === "Documents" && <><div className="document-policy"><h3>Document behavior</h3><ul><li>The uploaded file becomes the downloadable website copy.</li><li>The SharePoint URL and metadata can be edited later.</li><li>Removing a document deletes its local stored copy.</li><li>Files are served as downloads, not executed in the browser.</li></ul></div><h3>Documents for selected {document.target_type}</h3><div className="data-record-list editable-record-list">{targetDocuments.map(item => <article key={item.id}><FileUp/><div><b>{item.title}</b><small>{item.file_name || "Shared link only"}</small></div><button onClick={() => chooseDocument(item.id)}>Edit</button><button className="remove-record" onClick={() => window.confirm("Remove this document and its stored file? This cannot be undone.") && submit(() => api.deleteDocument(item.id), "Document removed", async () => { if (editingDocumentId === item.id) chooseDocument(""); await loadTargetDocuments(); })}>Remove</button></article>)}</div></>}
-      </aside>
+        {section === "Critical items" && <><h3>Currently active</h3><div className="data-record-list editable-record-list">{criticalItems.slice(0,8).map(item => <article key={item.id}><span className={item.severity.toLowerCase()}>{item.severity}</span><div><b>{item.title}</b><small>{item.msOwner} · {item.capcoOwner}</small></div><button onClick={() => chooseCritical(item.id)}>{canWrite ? "Edit" : "View"}</button></article>)}</div></>}
+        {section === "Meetings" && <><h3>Recent meeting records</h3><div className="data-record-list editable-record-list">{meetings.slice(0,8).map(item => <article key={`${item.id}-${item.event_id}`}><CalendarDays/><div><b>{item.title}</b><small>{new Date(item.meeting_date).toLocaleString()}</small></div><button onClick={() => chooseMeeting(item.id)}>{canWrite ? "Edit" : "View"}</button></article>)}</div></>}
+        {section === "Commercial pipeline" && <><h3>Current pipeline</h3><div className="data-record-list editable-record-list">{podOpportunities.slice(0,8).map(item => <article key={item.id}><BriefcaseBusiness/><div><b>{item.name}</b><small>{item.stage} · {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(item.estimated_value)}</small></div><button onClick={() => chooseOpportunity(item.id)}>{canWrite ? "Edit" : "View"}</button></article>)}</div></>}
+        {section === "Documents" && <><div className="document-policy"><h3>Document behavior</h3><ul><li>The uploaded file becomes the downloadable website copy.</li><li>The SharePoint URL and metadata can be edited later.</li><li>Removing a document deletes its local stored copy.</li><li>Files are served as downloads, not executed in the browser.</li></ul></div><h3>Documents for selected {document.target_type}</h3><div className="data-record-list editable-record-list">{targetDocuments.map(item => <article key={item.id}><FileUp/><div><b>{item.title}</b><small>{item.file_name || "Shared link only"}</small></div><button onClick={() => chooseDocument(item.id)}>{canWrite ? "Edit" : "View"}</button>{canWrite && <button className="remove-record" onClick={() => window.confirm("Remove this document and its stored file? This cannot be undone.") && submit(() => api.deleteDocument(item.id), "Document removed", async () => { if (editingDocumentId === item.id) chooseDocument(""); await loadTargetDocuments(); })}>Remove</button>}</article>)}</div></>}
+      </aside>}
     </main>
-    {notice && <div className="pod-toast" role="status"><Check/>{notice}</div>}
+    {notice && <div className="pod-toast" role="status" aria-live="polite"><Check/>{notice}</div>}
   </div>;
 }

@@ -1,0 +1,926 @@
+/*
+ * Final visual system overrides.
+ *
+ * The original dashboard stylesheet contains several generations of compact
+ * desktop rules.  Keeping the corrective layer separate makes the intended
+ * type scale, stacking order, and responsive behavior easy to audit.
+ */
+
+:root {
+  --visual-text: #173042;
+  --visual-muted: #587080;
+  --visual-subtle: #718695;
+  --visual-border: #d8e1e7;
+  --visual-control-height: 38px;
+  --visual-touch-target: 44px;
+}
+
+/* Keep the resourcing overview information-dense on desktop. */
+@media (min-width: 901px) {
+  .resourcing-view .res-hero {
+    min-height: 92px;
+    padding-top: 13px;
+    padding-bottom: 13px;
+  }
+
+  .resourcing-view .res-tabs {
+    height: 40px;
+  }
+
+  .resourcing-view .res-content {
+    padding-top: 12px;
+  }
+
+  .resourcing-view .res-pulse > button {
+    min-height: 74px;
+    padding: 10px 12px;
+    grid-template-columns: 34px minmax(0, 1fr) auto 14px;
+    grid-template-rows: auto auto;
+    column-gap: 10px;
+    row-gap: 2px;
+  }
+
+  .resourcing-view .res-pulse > button > span {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    align-self: center;
+  }
+
+  .resourcing-view .res-pulse > button > small {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+  }
+
+  .resourcing-view .res-pulse > button > strong {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    align-self: center;
+    font-size: 22px;
+  }
+
+  .resourcing-view .res-pulse > button > em {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+  }
+
+  .resourcing-view .res-pulse > button > svg {
+    grid-column: 4;
+    grid-row: 1 / 3;
+    align-self: center;
+  }
+
+  .resourcing-view .res-secondary-metrics {
+    margin-top: 8px;
+    gap: 8px;
+  }
+
+  .resourcing-view .res-secondary-metrics article {
+    min-height: 56px;
+    padding: 8px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .resourcing-view .res-secondary-metrics article > span {
+    min-width: 0;
+    display: grid;
+    gap: 2px;
+  }
+
+  .resourcing-view .res-secondary-metrics article em {
+    color: #718493;
+    font-size: 7px;
+    font-style: normal;
+    font-weight: 500;
+    line-height: 1.25;
+  }
+
+  .resourcing-view .res-secondary-metrics article.empty {
+    background: #fbfcfd;
+  }
+
+  .resourcing-view .res-secondary-metrics article.empty strong {
+    color: #91a0aa;
+    font-size: 17px;
+  }
+
+  .resourcing-view .res-card > header {
+    min-height: 46px;
+    padding: 8px 12px;
+  }
+
+  .resourcing-view .res-funnel {
+    margin-top: 10px;
+  }
+
+  .resourcing-view .res-funnel > div {
+    padding: 13px 14px 11px;
+    gap: 10px;
+  }
+
+  .resourcing-view .res-funnel > div > article {
+    min-height: 54px;
+    height: 54px;
+    padding: 7px 10px;
+  }
+
+  .resourcing-view .res-two-col {
+    margin-top: 10px;
+    gap: 10px;
+  }
+}
+
+html,
+body,
+#root,
+.app-shell,
+.workspace,
+.pod-view,
+.resourcing-view,
+.data-management {
+  max-width: 100%;
+  min-width: 0;
+}
+
+html,
+body {
+  overflow-x: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  color: var(--visual-text);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--visual-subtle);
+  opacity: 1;
+}
+
+/* Readable small copy without changing the information hierarchy. */
+.top-navigation nav button,
+.global-actions label,
+.global-actions select,
+.workspace-eyebrow,
+.pod-view small,
+.pod-view label,
+.pod-view em,
+.resourcing-view small,
+.resourcing-view label,
+.resourcing-view em,
+.data-management small,
+.data-management label,
+.settings-view small,
+.settings-view label {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pod-view p,
+.resourcing-view p,
+.data-management p,
+.secondary-view p,
+.settings-view p {
+  color: var(--visual-muted);
+}
+
+.pod-view button,
+.pod-view input,
+.pod-view select,
+.resourcing-view button,
+.resourcing-view input,
+.resourcing-view select,
+.resourcing-view textarea,
+.data-management button,
+.data-management input,
+.data-management select,
+.data-management textarea,
+.settings-view button,
+.settings-view select {
+  font-size: 12px;
+}
+
+/* Dialogs must always sit above the persistent assistant. */
+.account-assistant,
+.assistant-launcher {
+  z-index: 120 !important;
+}
+
+.modal-backdrop,
+.pod-drawer-backdrop,
+.res-drawer-backdrop,
+.res-modal-backdrop {
+  z-index: 300 !important;
+}
+
+.modal,
+.pod-detail,
+.res-drawer,
+.res-authoring-modal {
+  position: relative;
+  z-index: 301;
+}
+
+.res-floating-edit {
+  z-index: 302 !important;
+}
+
+.app-shell:has(.modal-backdrop, .pod-drawer-backdrop, .res-drawer-backdrop) .assistant-launcher,
+.app-shell:has(.modal-backdrop, .pod-drawer-backdrop, .res-drawer-backdrop) .account-assistant {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+body:has([aria-modal="true"]) .assistant-launcher,
+body:has([aria-modal="true"]) .account-assistant {
+  display: none !important;
+}
+
+/* Stakeholder map: preserve panning inside the canvas, never on the page. */
+.map-viewport,
+.map-world,
+.map-section .workspace {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.map-viewport {
+  overflow: hidden;
+}
+
+.canvas-toolbar button {
+  min-width: 34px;
+  min-height: 34px;
+}
+
+.canvas-hint {
+  font-size: 11px;
+}
+
+/* Pod view */
+.pod-view {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding-bottom: 0 !important;
+}
+
+.pod-view > .pod-view-head,
+.pod-view > .pod-pulse,
+.pod-view > .pod-resourcing-link,
+.pod-view > .pod-resourcing-detail {
+  flex: 0 0 auto;
+}
+
+.pod-view > .pod-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.pod-view-head,
+.pod-view-controls,
+.period-controls,
+.pod-scroll,
+.pod-primary-grid,
+.pod-two-col,
+.pod-resourcing-detail {
+  min-width: 0;
+}
+
+.pod-view-head h1 {
+  line-height: 1.12;
+  text-wrap: balance;
+}
+
+.pod-primary-grid {
+  align-items: stretch;
+}
+
+.pod-primary-grid > section {
+  min-width: 0;
+  height: 100%;
+}
+
+.pod-priority-bar {
+  scrollbar-width: thin;
+}
+
+.calendar-filters,
+.scope-toggle,
+.period-toggle {
+  min-width: 0;
+}
+
+/* Resourcing */
+.res-content,
+.res-hero-context,
+.res-tabs,
+.res-authoring-toolbar,
+.res-filter-bar,
+.res-role-list,
+.res-role-card,
+.res-role-main,
+.res-quick-filters {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.res-funnel > div {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.res-funnel > div > article {
+  flex: 1 0 130px;
+  max-width: 210px;
+}
+
+.res-funnel > div > svg {
+  flex: 0 0 18px;
+}
+
+.res-quick-filters {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: thin;
+}
+
+.res-quick-filters > button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.res-role-card > *,
+.res-role-main > * {
+  min-width: 0;
+}
+
+.res-role-main b,
+.res-role-main small,
+.res-role-stat em,
+.res-drawer-context > * {
+  overflow-wrap: anywhere;
+}
+
+.res-drawer {
+  container-type: inline-size;
+}
+
+.step-editor-main > div {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
+.step-editor-main label,
+.step-editor-main input,
+.step-editor-main select {
+  min-width: 0;
+  width: 100%;
+}
+
+.res-onboarding-table {
+  position: relative;
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.res-onboarding-table th:first-child,
+.res-onboarding-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  width: 42px;
+  min-width: 42px;
+  background: #fff;
+}
+
+.res-onboarding-table th:nth-child(2),
+.res-onboarding-table td:nth-child(2) {
+  position: sticky;
+  left: 42px;
+  z-index: 3;
+  min-width: 150px;
+  background: #fff;
+  box-shadow: 1px 0 0 var(--visual-border);
+}
+
+.res-onboarding-table thead th:first-child,
+.res-onboarding-table thead th:nth-child(2) {
+  z-index: 4;
+  background: #f7fafb;
+}
+
+/* Data administration and settings */
+.data-management-body {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  align-items: start;
+}
+
+.data-entry-card,
+.data-guidance,
+.data-form-grid,
+.data-form-grid > * {
+  min-width: 0;
+}
+
+.data-management-body:has(.data-guidance .data-record-list:empty) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.data-management-body:has(.data-guidance.empty) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.data-management-body:not(:has(.data-guidance)) {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.data-guidance:has(.data-record-list:empty),
+.data-guidance.empty {
+  display: none !important;
+}
+
+.settings-view {
+  align-items: flex-start;
+}
+
+.settings-card {
+  width: min(880px, 100%);
+  max-width: 880px;
+  margin-inline: auto;
+}
+
+@container (max-width: 440px) {
+  .step-editor-main > div {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .map-section .workspace {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .map-section .workspace-header {
+    min-height: 168px;
+    align-items: flex-start;
+    flex-direction: column;
+    justify-content: center;
+    gap: 14px;
+  }
+
+  .map-section .workspace-actions {
+    display: flex;
+    flex-wrap: wrap;
+    width: 100%;
+    min-width: 0;
+    gap: 8px;
+  }
+
+  .map-section .workspace-actions .global-search {
+    flex: 1 1 230px;
+    width: auto;
+  }
+
+  .data-management-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .data-guidance,
+  .data-guidance:has(.data-record-list:empty) {
+    position: static;
+  }
+
+  .settings-card {
+    width: 100%;
+  }
+}
+
+@media (max-width: 700px) {
+  :root {
+    --visual-control-height: 42px;
+  }
+
+  .top-navigation,
+  .top-navigation nav,
+  .global-actions,
+  .workspace,
+  .workspace-header,
+  .pod-view,
+  .resourcing-view,
+  .data-management,
+  .secondary-view {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .top-navigation nav {
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .top-navigation nav::-webkit-scrollbar {
+    display: none;
+  }
+
+  .top-navigation nav button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .pod-view-head {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+    padding: 18px 16px;
+  }
+
+  .pod-view-head > div:first-child,
+  .pod-view-controls {
+    width: 100%;
+  }
+
+  .pod-view-head h1 {
+    max-width: 100%;
+    margin-right: 0;
+    font-size: clamp(24px, 8vw, 30px);
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .pod-view-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .pod-tag-filter {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .pod-tag-filter select {
+    grid-column: 1 / -1;
+    width: 100%;
+    min-height: var(--visual-control-height);
+  }
+
+  .period-controls {
+    display: grid !important;
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    width: 100%;
+    gap: 7px;
+  }
+
+  .period-controls > button:not(.today-button),
+  .period-toggle button {
+    display: inline-flex !important;
+  }
+
+  .period-controls > button,
+  .period-toggle button {
+    min-width: 44px;
+    min-height: var(--visual-touch-target);
+    align-items: center;
+    justify-content: center;
+  }
+
+  .period-controls > strong {
+    align-self: center;
+    min-width: 0;
+    text-align: center;
+    overflow-wrap: anywhere;
+  }
+
+  .period-controls .today-button {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .period-toggle {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+  }
+
+  .pod-pulse,
+  .pod-resourcing-link,
+  .pod-resourcing-detail,
+  .pod-primary-grid,
+  .pod-two-col,
+  .health-grid,
+  .data-summary,
+  .data-form-grid,
+  .data-form-grid.three {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .pod-resourcing-link {
+    display: grid;
+  }
+
+  .pod-resourcing-link > * {
+    min-width: 0;
+  }
+
+  .pod-priority-bar {
+    display: flex;
+    max-width: 100%;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    white-space: nowrap;
+  }
+
+  .pod-priority-bar > * {
+    flex: 0 0 auto;
+  }
+
+  .calendar-filters,
+  .workload-controls,
+  .scope-toggle {
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .res-content {
+    overflow-x: hidden;
+  }
+
+  .res-hero-context {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    width: 100%;
+    gap: 6px 10px;
+  }
+
+  .res-hero-context small,
+  .res-hero-context strong {
+    min-width: 0;
+  }
+
+  .res-hero-context strong {
+    overflow-wrap: anywhere;
+  }
+
+  .res-hero-context button {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: center;
+    min-width: 44px;
+    max-width: 132px;
+    min-height: var(--visual-touch-target);
+  }
+
+  .res-tabs {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .res-tabs button {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    min-height: var(--visual-touch-target);
+  }
+
+  .res-authoring-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .res-authoring-toolbar > label {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .res-filter-bar {
+    overflow: hidden;
+  }
+
+  .res-quick-filters {
+    width: 100%;
+  }
+
+  .res-role-card {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    overflow: hidden;
+    gap: 12px;
+  }
+
+  .res-role-card .res-role-main {
+    grid-column: 1 / -1;
+  }
+
+  .res-role-card .res-role-stat {
+    display: flex !important;
+    width: auto;
+    min-width: 0;
+  }
+
+  .res-role-card > svg:last-child {
+    position: absolute;
+    top: 18px;
+    right: 14px;
+  }
+
+  .res-role-main {
+    padding-right: 28px;
+  }
+
+  .res-role-main h3,
+  .res-role-main b {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .res-authoring-modal,
+  .res-drawer {
+    width: min(100%, 100vw) !important;
+    max-width: 100vw !important;
+  }
+
+  .res-authoring-modal form,
+  .res-authoring-modal input,
+  .res-authoring-modal select,
+  .res-authoring-modal textarea,
+  .res-drawer input,
+  .res-drawer select,
+  .res-drawer textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .res-authoring-modal input,
+  .res-authoring-modal select,
+  .res-authoring-modal button,
+  .res-drawer input,
+  .res-drawer select,
+  .res-drawer button,
+  .data-management input,
+  .data-management select,
+  .data-management button,
+  .settings-view select,
+  .settings-view button {
+    min-height: var(--visual-touch-target);
+  }
+
+  .step-editor-main > div {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .res-onboarding-table th:nth-child(2),
+  .res-onboarding-table td:nth-child(2) {
+    min-width: 130px;
+  }
+
+  .data-tabs {
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+
+  .data-tabs button {
+    flex: 0 0 auto;
+    min-height: var(--visual-touch-target);
+    white-space: nowrap;
+  }
+
+  .data-guidance:has(.data-record-list:empty) {
+    display: none;
+  }
+
+  .settings-card > label {
+    gap: 12px;
+  }
+
+  .settings-card > label > span {
+    min-width: 0;
+  }
+
+  .minimap {
+    right: auto;
+    left: 10px;
+    bottom: 12px;
+  }
+
+  .canvas-hint {
+    display: none;
+  }
+
+  .account-assistant {
+    max-width: calc(100vw - 20px);
+  }
+}
+
+/* Duration empty states keep their label and explanation on separate lines. */
+.resourcing-view .res-secondary-metrics article > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.resourcing-view .res-secondary-metrics article em {
+  color: #718493;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.resourcing-view .res-secondary-metrics article.empty {
+  background: #fbfcfd;
+}
+
+.resourcing-view .res-secondary-metrics article.empty strong {
+  color: #91a0aa;
+}
+
+@media (max-width: 900px) {
+  .resourcing-view .res-pulse {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .resourcing-view .res-pulse > button {
+    min-height: 76px;
+    padding: 10px 12px;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    grid-template-rows: auto auto;
+    column-gap: 9px;
+    row-gap: 2px;
+    border: 0;
+    border-right: 1px solid #e0e6ea;
+    border-bottom: 1px solid #e0e6ea;
+  }
+
+  .resourcing-view .res-pulse > button:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .resourcing-view .res-pulse > button:last-child {
+    grid-column: 1 / -1;
+    border-right: 0;
+    border-bottom: 0;
+  }
+
+  .resourcing-view .res-pulse > button > span {
+    grid-column: 1;
+    grid-row: 1 / 3;
+    align-self: center;
+  }
+
+  .resourcing-view .res-pulse > button > small {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+  }
+
+  .resourcing-view .res-pulse > button > em {
+    grid-column: 2;
+    grid-row: 2;
+    align-self: start;
+  }
+
+  .resourcing-view .res-pulse > button > strong {
+    grid-column: 3;
+    grid-row: 1 / 3;
+    align-self: center;
+    font-size: 20px;
+  }
+
+  .resourcing-view .res-pulse > button > svg {
+    display: none;
+  }
+
+  .resourcing-view .res-secondary-metrics article {
+    min-height: 68px;
+    gap: 8px;
+  }
+}

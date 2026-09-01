@@ -25,11 +25,14 @@ class MigrationTests(unittest.TestCase):
                 revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()[0]
                 tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
                 foreign_key_errors = connection.execute("PRAGMA foreign_key_check").fetchall()
-            self.assertEqual("0008_account_assistant", revision)
+            self.assertEqual("0012_executive_provenance", revision)
             command.check(config)
             self.assertTrue({
                 "accounts", "stakeholders", "opportunities", "pod_events", "executive_engagements",
                 "assistant_document_chunks", "assistant_conversations", "assistant_messages",
+                "resource_requirements", "resourcing_candidates", "candidate_interviews",
+                "candidate_offers", "onboarding_records", "onboarding_steps",
+                "idempotency_records",
             }.issubset(tables))
             self.assertEqual([], foreign_key_errors)
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from copy import deepcopy
 from hashlib import sha256
 from collections import defaultdict
 from datetime import date, datetime, timezone
@@ -9,6 +10,8 @@ from typing import Optional
 from uuid import uuid4
 
 from sqlalchemy import create_engine, delete, event, inspect, insert, select, text, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -66,6 +69,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
         if self.engine.dialect.name == "sqlite":
             event.listen(self.engine, "connect", _enable_sqlite_foreign_keys)
         self._mutation_depth = 0
+        self._generation = 0
         should_create = settings.auto_create_schema if auto_create_schema is None else auto_create_schema
         should_seed = settings.seed_demo_data if seed_demo_data is None else seed_demo_data
         if should_create:
@@ -85,30 +89,32 @@ class PersistentStakeholderRepository(StakeholderRepository):
     def _rows(connection: Connection, table) -> list[dict]:
         return [dict(row) for row in connection.execute(select(table)).mappings()]
 
-    def _load_normalized(self) -> bool:
-        with self.engine.connect() as connection:
-            if not inspect(connection).has_table("accounts"):
-                return False
-            stakeholder_rows = self._rows(connection, stakeholders)
-            if not stakeholder_rows:
-                return False
-            pod_rows = self._rows(connection, pods)
-            division_rows = self._rows(connection, divisions)
-            unit_rows = self._rows(connection, business_units)
-            assignment_rows = self._rows(connection, stakeholder_assignments)
-            enterprise_rows = self._rows(connection, enterprise_functions)
-            meeting_rows = self._rows(connection, meetings)
-            meeting_link_rows = self._rows(connection, meeting_stakeholders)
-            meeting_employee_rows = self._rows(connection, meeting_employees)
-            meeting_opportunity_rows = self._rows(connection, meeting_opportunities)
-            note_rows = self._rows(connection, notes)
-            opportunity_rows = self._rows(connection, opportunities)
-            opportunity_link_rows = self._rows(connection, opportunity_stakeholders)
-            opportunity_employee_rows = self._rows(connection, opportunity_employees)
-            stakeholder_employee_rows = self._rows(connection, stakeholder_employee_relationships)
-            history_rows = self._rows(connection, assignment_history)
-            document_rows = self._rows(connection, documents)
-            state_rows = self._rows(connection, application_state)
+    def _load_normalized(self, connection: Connection | None = None) -> bool:
+        if connection is None:
+            with self.engine.connect() as owned_connection:
+                return self._load_normalized(owned_connection)
+        if not inspect(connection).has_table("accounts"):
+            return False
+        stakeholder_rows = self._rows(connection, stakeholders)
+        if not stakeholder_rows:
+            return False
+        pod_rows = self._rows(connection, pods)
+        division_rows = self._rows(connection, divisions)
+        unit_rows = self._rows(connection, business_units)
+        assignment_rows = self._rows(connection, stakeholder_assignments)
+        enterprise_rows = self._rows(connection, enterprise_functions)
+        meeting_rows = self._rows(connection, meetings)
+        meeting_link_rows = self._rows(connection, meeting_stakeholders)
+        meeting_employee_rows = self._rows(connection, meeting_employees)
+        meeting_opportunity_rows = self._rows(connection, meeting_opportunities)
+        note_rows = self._rows(connection, notes)
+        opportunity_rows = self._rows(connection, opportunities)
+        opportunity_link_rows = self._rows(connection, opportunity_stakeholders)
+        opportunity_employee_rows = self._rows(connection, opportunity_employees)
+        stakeholder_employee_rows = self._rows(connection, stakeholder_employee_relationships)
+        history_rows = self._rows(connection, assignment_history)
+        document_rows = self._rows(connection, documents)
+        state_rows = self._rows(connection, application_state)
 
         pod_names = {row["id"]: row["name"] for row in pod_rows}
         division_by_id = {row["id"]: row for row in division_rows}
@@ -223,6 +229,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
         self.history = [AssignmentHistory(**{**{key: row[key] for key in AssignmentHistory.model_fields}, "effective_at": _utc(row["effective_at"])}) for row in history_rows]
         self.documents = {row["id"]: DocumentLink(**{**{key: row[key] for key in DocumentLink.model_fields}, "created_at": _utc(row["created_at"]), "updated_at": _utc(row["updated_at"])}) for row in document_rows}
         state = {row["key"]: row["value"] for row in state_rows}
+        self._generation = int(state.get("repository_generation", 0) or 0)
         self.dashboard_task_statuses = state.get("dashboard_task_statuses", {})
         self.dashboard_task_records = state.get("dashboard_task_records", {})
         self.dashboard_focus = state.get("dashboard_focus", {})
@@ -275,11 +282,13 @@ class PersistentStakeholderRepository(StakeholderRepository):
             else:
                 connection.execute(insert(table).values(**row))
 
-    def _normalized_rows(self) -> dict:
+    def _normalized_rows(self, connection: Connection | None = None) -> dict:
         available_employee_ids: set[str] = set()
-        with self.engine.connect() as connection:
-            if inspect(connection).has_table("capco_employees"):
-                available_employee_ids = set(connection.execute(text("SELECT id FROM capco_employees")).scalars())
+        if connection is None:
+            with self.engine.connect() as owned_connection:
+                return self._normalized_rows(owned_connection)
+        if inspect(connection).has_table("capco_employees"):
+            available_employee_ids = set(connection.execute(text("SELECT id FROM capco_employees")).scalars())
         known_pods = sorted({row["pod"] for row in self.divisions.values()} | set(self.enterprise))
         # Pod IDs are the account's governed codes (ISG, Wealth Management, MSIM).
         # They are shared unchanged by operating and executive fact tables.
@@ -503,19 +512,142 @@ class PersistentStakeholderRepository(StakeholderRepository):
         with self.engine.begin() as connection:
             self._write_normalized(connection, rows)
 
+    @staticmethod
+    def _row_key(row: dict, columns: tuple[str, ...]) -> tuple:
+        return tuple(row[column] for column in columns)
+
+    def _write_delta(self, connection: Connection, before: dict, after: dict) -> None:
+        """Persist only rows changed by one repository command.
+
+        The compatibility read model remains in memory for now, but request-time
+        writes no longer prune or rebuild whole canonical tables.
+        """
+        specifications = {
+            "accounts": (accounts, ("id",)),
+            "pods": (pods, ("id",)),
+            "divisions": (divisions, ("id",)),
+            "business_units": (business_units, ("id",)),
+            "stakeholders": (stakeholders, ("id",)),
+            "assignments": (stakeholder_assignments, ("id",)),
+            "stakeholder_employee_relationships": (stakeholder_employee_relationships, ("id",)),
+            "enterprise": (enterprise_functions, ("id",)),
+            "meetings": (meetings, ("id",)),
+            "meeting_links": (meeting_stakeholders, ("meeting_id", "stakeholder_id")),
+            "meeting_employees": (meeting_employees, ("meeting_id", "employee_id")),
+            "meeting_opportunities": (meeting_opportunities, ("meeting_id", "opportunity_id")),
+            "notes": (notes, ("id",)),
+            "opportunities": (opportunities, ("id",)),
+            "opportunity_links": (opportunity_stakeholders, ("opportunity_id", "stakeholder_id")),
+            "opportunity_employees": (opportunity_employees, ("opportunity_id", "employee_id")),
+            "history": (assignment_history, ("id",)),
+            "documents": (documents, ("id",)),
+            "state": (application_state, ("key",)),
+        }
+        before_maps = {
+            name: {self._row_key(row, keys): row for row in before[name]}
+            for name, (_, keys) in specifications.items()
+        }
+        after_maps = {
+            name: {self._row_key(row, keys): row for row in after[name]}
+            for name, (_, keys) in specifications.items()
+        }
+
+        # Remove changed child/link rows first. Assignment versions and history
+        # are append-only; stakeholder deletion relies on their FK cascades.
+        delete_order = (
+            "meeting_opportunities", "meeting_employees", "meeting_links",
+            "opportunity_employees", "opportunity_links", "stakeholder_employee_relationships",
+            "documents", "notes", "meetings", "opportunities", "enterprise", "stakeholders", "state",
+        )
+        for name in delete_order:
+            table, key_columns = specifications[name]
+            removed = before_maps[name].keys() - after_maps[name].keys()
+            for key in removed:
+                condition = None
+                for column_name, value in zip(key_columns, key):
+                    clause = table.c[column_name] == value
+                    condition = clause if condition is None else condition & clause
+                connection.execute(delete(table).where(condition))
+
+        insert_order = (
+            "accounts", "pods", "divisions", "business_units", "stakeholders", "assignments",
+            "enterprise", "meetings", "opportunities", "notes", "documents", "history", "state",
+            "stakeholder_employee_relationships", "meeting_links", "meeting_employees",
+            "opportunity_links", "opportunity_employees", "meeting_opportunities",
+        )
+        for name in insert_order:
+            table, key_columns = specifications[name]
+            old_rows, new_rows = before_maps[name], after_maps[name]
+            for key, row in new_rows.items():
+                if name == "assignments" and key not in old_rows:
+                    connection.execute(
+                        update(stakeholder_assignments).where(
+                            stakeholder_assignments.c.stakeholder_id == row["stakeholder_id"],
+                            stakeholder_assignments.c.is_current.is_(True),
+                        ).values(is_current=False, effective_to=date.today())
+                    )
+                if key not in old_rows:
+                    values = row
+                    if name == "divisions":
+                        values = {**row, "head_stakeholder_id": None}
+                    connection.execute(insert(table).values(**values))
+                elif row != old_rows[key]:
+                    condition = None
+                    for column_name, value in zip(key_columns, key):
+                        clause = table.c[column_name] == value
+                        condition = clause if condition is None else condition & clause
+                    values = {column: value for column, value in row.items() if column not in key_columns}
+                    connection.execute(update(table).where(condition).values(**values))
+
+        # Division heads intentionally form a cycle through stakeholder
+        # assignments, so restore them after all parent rows exist.
+        for key, row in after_maps["divisions"].items():
+            if key not in before_maps["divisions"] or row != before_maps["divisions"][key]:
+                connection.execute(
+                    update(divisions).where(divisions.c.id == row["id"]).values(head_stakeholder_id=row["head_stakeholder_id"])
+                )
+
+    def _lock_generation(self, connection: Connection) -> int:
+        values = {"key": "repository_generation", "value": 0}
+        if connection.dialect.name == "postgresql":
+            connection.execute(postgresql_insert(application_state).values(**values).on_conflict_do_nothing(index_elements=["key"]))
+        elif connection.dialect.name == "sqlite":
+            connection.execute(sqlite_insert(application_state).values(**values).on_conflict_do_nothing(index_elements=["key"]))
+        else:
+            existing = connection.execute(select(application_state.c.key).where(application_state.c.key == values["key"])).scalar_one_or_none()
+            if existing is None:
+                connection.execute(insert(application_state).values(**values))
+        statement = select(application_state.c.value).where(application_state.c.key == "repository_generation")
+        if connection.dialect.name == "postgresql":
+            statement = statement.with_for_update()
+        return int(connection.execute(statement).scalar_one() or 0)
+
+    def refresh_if_stale(self) -> None:
+        with self.engine.connect() as connection:
+            generation = connection.execute(
+                select(application_state.c.value).where(application_state.c.key == "repository_generation")
+            ).scalar_one_or_none()
+            generation = int(generation or 0)
+            if generation != self._generation:
+                self._load_normalized(connection)
+
     def reconcile_external_identities(self) -> None:
-        """Link legacy display snapshots after workforce identities are available."""
-        self._persist_normalized()
+        """Deprecated: identity repair must run as an explicit migration."""
         self._load_normalized()
 
     def create_meeting_transactional(self, payload: MeetingCreate, event_writer):
         """Commit the canonical meeting and its operating calendar projection atomically."""
         with self._lock:
-            meeting = super().create_meeting(payload)
             try:
                 with self.engine.begin() as connection:
-                    self._write_normalized(connection, self._normalized_rows())
+                    generation = self._lock_generation(connection)
+                    self._load_normalized(connection)
+                    before = deepcopy(self._normalized_rows(connection))
+                    meeting = super().create_meeting(payload)
+                    self._write_delta(connection, before, self._normalized_rows(connection))
                     event = event_writer(connection, meeting)
+                    connection.execute(update(application_state).where(application_state.c.key == "repository_generation").values(value=generation + 1))
+                    self._generation = generation + 1
                 return meeting, event
             except Exception:
                 self._load_normalized()
@@ -524,11 +656,16 @@ class PersistentStakeholderRepository(StakeholderRepository):
     def update_meeting_transactional(self, meeting_id: str, payload: MeetingUpdate, event_writer):
         """Update the canonical meeting and its calendar projection in one transaction."""
         with self._lock:
-            meeting = super().update_meeting(meeting_id, payload)
             try:
                 with self.engine.begin() as connection:
-                    self._write_normalized(connection, self._normalized_rows())
+                    generation = self._lock_generation(connection)
+                    self._load_normalized(connection)
+                    before = deepcopy(self._normalized_rows(connection))
+                    meeting = super().update_meeting(meeting_id, payload)
+                    self._write_delta(connection, before, self._normalized_rows(connection))
                     event = event_writer(connection, meeting)
+                    connection.execute(update(application_state).where(application_state.c.key == "repository_generation").values(value=generation + 1))
+                    self._generation = generation + 1
                 return meeting, event
             except Exception:
                 self._load_normalized()
@@ -536,16 +673,21 @@ class PersistentStakeholderRepository(StakeholderRepository):
 
     def _apply(self, operation):
         with self._lock:
-            outermost = self._mutation_depth == 0
+            if self._mutation_depth:
+                return operation()
             self._mutation_depth += 1
             try:
-                result = operation()
-                if outermost:
-                    self._persist_normalized()
+                with self.engine.begin() as connection:
+                    generation = self._lock_generation(connection)
+                    self._load_normalized(connection)
+                    before = deepcopy(self._normalized_rows(connection))
+                    result = operation()
+                    self._write_delta(connection, before, self._normalized_rows(connection))
+                    connection.execute(update(application_state).where(application_state.c.key == "repository_generation").values(value=generation + 1))
+                    self._generation = generation + 1
                 return result
             except Exception:
-                if outermost:
-                    self._load_normalized()
+                self._load_normalized()
                 raise
             finally:
                 self._mutation_depth -= 1
@@ -615,7 +757,9 @@ def create_repository() -> StakeholderRepository:
         repository.backend_name = "memory"
         return repository
     try:
-        return PersistentStakeholderRepository(settings.database_url)
+        # Application startup is always read-only. Demo population is available
+        # only through `python -m backend.manage seed-demo`.
+        return PersistentStakeholderRepository(settings.database_url, seed_demo_data=False)
     except (SQLAlchemyError, OSError, ValueError, RuntimeError) as error:
         if settings.require_database:
             raise RuntimeError("Database-backed stakeholder repository failed to initialize") from error

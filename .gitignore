@@ -6,3 +6,6 @@ __pycache__/
 backend/uploads/*
 dist/
 node_modules/
+.playwright/
+playwright-report/
+test-results/
