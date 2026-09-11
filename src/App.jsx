@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { hierarchy, tree } from "d3-hierarchy";
 import {
   AlertTriangle, Bell, BriefcaseBusiness, Building2, CalendarDays, ChevronDown, CircleDollarSign,
   Crosshair, FileChartColumn, Filter, Flag, Flame, Focus, Grid2X2,
@@ -16,6 +15,7 @@ import PodView from "./PodView";
 import ExecutiveView from "./ExecutiveView";
 import AccountAssistant from "./AccountAssistant";
 import ResourcingView from "./ResourcingView";
+import SearchableSelect from "./SearchableSelect";
 import OperationsCenter from "./OperationsCenter";
 import NotificationCenter from "./NotificationCenter";
 import {
@@ -35,30 +35,15 @@ const viewItems = [
   { name: "Influence Map", icon: Network },
 ];
 const drawerTabs = ["Overview", "Meetings", "Team", "Notes", "Documents", "Opportunities", "Staffing", "Bio"];
-const emptyMap = { title: "Stakeholder Map", divisions: [], enterprise: [] };
+const emptyMap = { title: "Stakeholder Map", people: [], roots: [], podHead: null, divisions: [], enterprise: [], diagnostics: { canonicalCount: 0, renderedCount: 0, missingManagers: [], duplicateReports: [], cycles: [] } };
 const initials = (name = "") => name.split(" ").filter(Boolean).map((part) => part[0]).slice(0, 2).join("");
 function flattenPeople(data) {
-  const rows = [];
-  const walk = (person, context) => {
-    if (!person) return;
-    rows.push({ person, ...context });
-    (person.reports || []).forEach((report) => walk(report, context));
-  };
-  data.divisions.forEach((division) => {
-    walk(division.head, { division: division.name, unit: "Division Leadership", teamType: "Business" });
-    division.units.forEach((unit) => {
-      const context = { division: division.name, unit: unit.name, teamType: "Business" };
-      walk(unit.lead, context);
-      unit.unknownReports.forEach((person) => walk(person, context));
-      walk(unit.primaryTechnology, { ...context, teamType: "Technology" });
-    });
-  });
-  data.enterprise.forEach((group) => {
-    const context = { division: "Enterprise Functions", unit: group.name, teamType: "Business" };
-    walk(group.lead, context);
-    group.members.forEach((person) => walk(person, context));
-  });
-  return rows;
+  return (data.people || []).map((person) => ({
+    person,
+    division: person.division,
+    unit: person.businessUnit,
+    teamType: person.teamType,
+  }));
 }
 
 const sectionKeys = {
@@ -92,6 +77,7 @@ function initialRoute(preferences) {
 
 function CountryFlag({ country, location }) {
   const code = country === "UK" ? "GB" : country;
+  if (!code || !location || location === "Not recorded") return null;
   let artwork;
   if (code === "US") artwork = <><rect width="18" height="12" fill="#fff" />{[0, 2, 4, 6, 8, 10].map((y) => <rect key={y} y={y} width="18" height="1" fill="#c8343f" />)}<rect width="8" height="6.5" fill="#28559a" /><circle cx="2" cy="2" r=".45" fill="#fff" /><circle cx="5" cy="2" r=".45" fill="#fff" /><circle cx="3.5" cy="4.4" r=".45" fill="#fff" /></>;
   else if (code === "CA") artwork = <><rect width="18" height="12" fill="#fff" /><rect width="4" height="12" fill="#d52b3a" /><rect x="14" width="4" height="12" fill="#d52b3a" /><path d="M9 2.2 10 4.5l1.4-.7-.5 2 1.2.5-2.1 1.4.3 2H7.7l.3-2-2.1-1.4 1.2-.5-.5-2 1.4.7z" fill="#d52b3a" /></>;
@@ -111,8 +97,8 @@ function PersonTooltip({ stakeholder, context }) {
       <span className="tooltip-name">{stakeholder.name}</span>
       <span>{stakeholder.title}</span>
       <span className="tooltip-rule" />
-      <span><b>Division</b>{context.division}</span>
-      <span><b>Business unit</b>{context.unit}</span>
+      <span><b>Division</b>{context.division || "Pod leadership"}</span>
+      <span><b>Business unit</b>{context.unit || "Not applicable"}</span>
       <span><b>Team</b>{context.teamType}</span>
       <span><b>Location</b>{stakeholder.location}</span>
       <span><b>Level</b>{stakeholder.level}</span>
@@ -133,86 +119,86 @@ function StakeholderNode({ stakeholder, context, onSelect, muted = false, select
       onClick={(event) => { event.stopPropagation(); onSelect(stakeholder, context); }}
       aria-label={`Open ${stakeholder.name}`}
     >
-      <span className="node-avatar">{initials(stakeholder.name)}</span>
-      {stakeholder.capcoContacts > 0 && <sup>{stakeholder.capcoContacts}</sup>}
+      <span className="node-avatar-wrap">
+        <span className="node-avatar">{initials(stakeholder.name)}</span>
+        {stakeholder.capcoContacts > 0 && <sup>{stakeholder.capcoContacts}</sup>}
+        <CountryFlag country={stakeholder.country} location={stakeholder.location} />
+      </span>
       <span className="node-copy"><strong>{stakeholder.name}</strong><small>{stakeholder.title}</small></span>
-      <CountryFlag country={stakeholder.country} location={stakeholder.location} />
       <PersonTooltip stakeholder={stakeholder} context={context} />
     </button>
   );
 }
 
+function OrgBranch({ stakeholder, context, onSelect, matches, selectedId, enterprise, depth = 0 }) {
+  const reports = stakeholder.reports || [];
+  const nodeContext = stakeholder.context || context;
+  return <div className="org-branch">
+    <StakeholderNode
+      stakeholder={stakeholder}
+      context={nodeContext}
+      onSelect={onSelect}
+      muted={!matches(stakeholder, nodeContext)}
+      selected={stakeholder.id === selectedId}
+      variant={depth === 0 ? (enterprise ? "enterprise-lead" : "manager") : reports.length ? "manager" : "standard"}
+    />
+    {!!reports.length && <div className="children-wrap"><div className="org-level">
+      {reports.map((report) => <OrgBranch key={report.id} stakeholder={report} context={context} onSelect={onSelect} matches={matches} selectedId={selectedId} enterprise={enterprise} depth={depth + 1} />)}
+    </div></div>}
+  </div>;
+}
+
 function TreeChart({ stakeholder, context, onSelect, matches, selectedId, enterprise = false }) {
-  const layout = useMemo(() => {
-    const root = hierarchy(stakeholder, (item) => item.reports || []);
-    tree().nodeSize([92, 82]).separation((left, right) => left.parent === right.parent ? 1 : 1.12)(root);
-    const descendants = root.descendants();
-    const minX = Math.min(...descendants.map((node) => node.x));
-    const maxX = Math.max(...descendants.map((node) => node.x));
-    const naturalWidth = maxX - minX + 110;
-    const width = Math.max(300, naturalWidth);
-    const contentOffset = (width - naturalWidth) / 2;
-    const height = Math.max(74, Math.max(...descendants.map((node) => node.y)) + 72);
-    const nodes = descendants.map((node) => ({ ...node, drawX: node.x - minX + 55 + contentOffset, drawY: node.y + 2 }));
-    const byData = new Map(nodes.map((node) => [node.data.id, node]));
-    const links = root.links().map((link) => ({ source: byData.get(link.source.data.id), target: byData.get(link.target.data.id) }));
-    return { nodes, links, width, height };
-  }, [stakeholder]);
-  return (
-    <div className={`org-tree-d3 ${enterprise ? "enterprise-tree" : ""}`} style={{ height: `${layout.height}px`, minWidth: `${layout.width}px` }}>
-      <svg className="org-links" viewBox={`0 0 ${layout.width} ${layout.height}`} preserveAspectRatio="xMidYMin meet" aria-hidden="true">
-        {layout.links.map(({ source, target }) => {
-          const sourceBottom = source.drawY + 62;
-          const midpoint = sourceBottom + Math.max(5, (target.drawY - sourceBottom) / 2);
-          return <path key={`${source.data.id}-${target.data.id}`} d={`M ${source.drawX} ${sourceBottom} V ${midpoint} H ${target.drawX} V ${target.drawY}`} />;
-        })}
-      </svg>
-      <div className="org-node-layer" style={{ width: `${layout.width}px`, height: `${layout.height}px` }}>
-        {layout.nodes.map((node) => (
-          <div key={node.data.id} className="positioned-org-node" style={{ left: `${node.drawX}px`, top: `${node.drawY}px` }}>
-            <StakeholderNode stakeholder={node.data} context={context} onSelect={onSelect} muted={!matches(node.data, context)} selected={node.data.id===selectedId} variant={node.depth === 0 ? (enterprise ? "enterprise-lead" : "manager") : node.children?.length ? "manager" : "standard"} />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  return <div className={`org-tree ${enterprise ? "enterprise-tree" : ""}`}>
+    <OrgBranch stakeholder={stakeholder} context={context} onSelect={onSelect} matches={matches} selectedId={selectedId} enterprise={enterprise} />
+  </div>;
 }
 
 function BusinessUnit({ businessUnit, division, onSelect, matches, selectedId }) {
   const businessContext = { division: division.name, unit: businessUnit.name, teamType: "Business" };
   const technologyContext = { ...businessContext, teamType: "Technology" };
+  const renderRoots = (roots, context) => (
+    <div className="unit-org-forest business-team-forest">
+      {roots.map((stakeholder) => (
+        <div className="unit-org-root" key={stakeholder.id}>
+          <TreeChart stakeholder={stakeholder} context={context} onSelect={onSelect} matches={matches} selectedId={selectedId} />
+        </div>
+      ))}
+    </div>
+  );
   return (
     <article className="business-unit" style={{ "--lane-accent": division.color }}>
       <header className="unit-heading">
         <strong>{businessUnit.name}</strong>
-        <span>Business Team <em>(Stakeholders)</em></span>
-        <span>Technology <em>(Primary Stakeholder)</em></span>
+        <span>Business organization</span>
+        <span>Technology manager</span>
       </header>
       <div className="unit-content">
         <section className="business-org" aria-label={`${businessUnit.name} business reporting structure`}>
-          <div className="org-tree">
-            <TreeChart stakeholder={businessUnit.lead} context={businessContext} onSelect={onSelect} matches={matches} selectedId={selectedId} />
-          </div>
-          {businessUnit.unknownReports.length > 0 && (
-            <div className="unknown-reporting">
-              <span>Reporting line unknown</span>
-              <div>
-                {businessUnit.unknownReports.map((stakeholder) => (
-                  <StakeholderNode key={stakeholder.id} stakeholder={stakeholder} context={businessContext} onSelect={onSelect} muted={!matches(stakeholder, businessContext)} selected={stakeholder.id===selectedId} />
-                ))}
-              </div>
-            </div>
-          )}
+          {renderRoots(businessUnit.businessRoots, businessContext)}
         </section>
-        <section className="technology-primary">
-          <span className="primary-eyebrow">Primary technology stakeholder</span>
-          <StakeholderNode stakeholder={businessUnit.primaryTechnology} context={technologyContext} onSelect={onSelect} muted={!matches(businessUnit.primaryTechnology, technologyContext)} selected={businessUnit.primaryTechnology.id===selectedId} variant="technology" />
-          <span className="team-count">+{businessUnit.primaryTechnology.reports.length} team members</span>
-          <small>View reports in profile</small>
+        <section className="technology-primary" aria-label={`${businessUnit.name} primary technology manager`}>
+          <span className="primary-eyebrow">Primary technology manager</span>
+          {businessUnit.primaryTechnology && <StakeholderNode stakeholder={businessUnit.primaryTechnology} context={technologyContext} onSelect={onSelect} muted={!matches(businessUnit.primaryTechnology, technologyContext)} selected={businessUnit.primaryTechnology.id === selectedId} variant="technology" />}
         </section>
       </div>
     </article>
   );
+}
+
+function PodHierarchyHeader({ podHead, divisions, laneWidth, onSelect, matches, selectedId }) {
+  if (!podHead) return null;
+  const context = { division: null, unit: null, teamType: "Business" };
+  const divisionCount = Math.max(1, divisions.length);
+  return <div className="pod-hierarchy" style={{ "--division-count": divisionCount, width: `${divisionCount * laneWidth + (divisionCount - 1) * 12}px` }}>
+    <div className="pod-head-card">
+      <span>Pod head</span>
+      <StakeholderNode stakeholder={podHead} context={context} onSelect={onSelect} muted={!matches(podHead, context)} selected={podHead.id === selectedId} variant="pod-head" />
+    </div>
+    <div className="pod-division-connectors" aria-hidden="true">
+      {divisions.map((division) => <i key={division.id} data-division-connector={division.id} />)}
+    </div>
+  </div>;
 }
 
 function DivisionLane({ division, onSelect, matches, unitVisible, selectedId }) {
@@ -221,7 +207,9 @@ function DivisionLane({ division, onSelect, matches, unitVisible, selectedId }) 
     <section className="division-lane" style={{ "--lane-accent": division.color }}>
       <div className="division-heading">
         <span className="division-title"><UsersRound /> {division.name.toUpperCase()}</span>
-        <StakeholderNode stakeholder={division.head} context={context} onSelect={onSelect} muted={!matches(division.head, context)} selected={division.head.id===selectedId} variant="division-head" />
+        {division.head
+          ? <StakeholderNode stakeholder={division.head} context={context} onSelect={onSelect} muted={!matches(division.head, context)} selected={division.head.id===selectedId} variant="division-head" />
+          : <span className="division-head-vacancy">Division manager not assigned</span>}
       </div>
       <div className="division-units">
         {division.units.filter((businessUnit) => unitVisible(businessUnit, division)).map((businessUnit) => (
@@ -241,18 +229,11 @@ function EnterpriseFunctions({ groups, onSelect, matches, selectedId }) {
           const context = { division: "Enterprise Functions", unit: group.name, teamType: "Business" };
           return (
             <article key={group.id}>
-              <h3><BriefcaseBusiness /> {group.name}</h3>
+              <h3><BriefcaseBusiness /> {group.name} <small>{group.memberCount} team member{group.memberCount === 1 ? "" : "s"}</small></h3>
               <div className="enterprise-org">
-                <div className="enterprise-lead-box">
-                  <StakeholderNode stakeholder={group.lead} context={context} onSelect={onSelect} muted={!matches(group.lead, context)} selected={group.lead.id===selectedId} variant="enterprise-lead" />
-                </div>
-                <div className="enterprise-report-row" style={{ "--report-count": group.members.length }}>
-                  {group.members.map((stakeholder) => (
-                    <div className="enterprise-report" key={stakeholder.id}>
-                      <StakeholderNode stakeholder={stakeholder} context={context} onSelect={onSelect} muted={!matches(stakeholder, context)} selected={stakeholder.id===selectedId} />
-                    </div>
-                  ))}
-                </div>
+                {group.roots.map((stakeholder) => <div className="enterprise-root" key={stakeholder.id}>
+                  <TreeChart stakeholder={stakeholder} context={context} onSelect={onSelect} matches={matches} selectedId={selectedId} enterprise />
+                </div>)}
               </div>
             </article>
           );
@@ -272,7 +253,7 @@ function MiniMap({ data, zoom, offset }) {
           </span>
         ))}
       </div>
-      <span className="mini-enterprise" />
+      {!!data.enterprise.length && <span className="mini-enterprise" />}
       <i className="mini-viewport" style={{ transform: `translate(${Math.max(0, -offset.x / 18)}px, ${Math.max(0, -offset.y / 18)}px)`, width: `${Math.max(38, 82 / zoom)}px`, height: `${Math.max(22, 45 / zoom)}px` }} />
     </div>
   );
@@ -281,32 +262,56 @@ function MiniMap({ data, zoom, offset }) {
 function MapCanvas({ data, query, filters, onSelect, editMode, panelMode, selectedId, focusRequest }) {
   const viewportRef = useRef(null);
   const worldRef = useRef(null);
-  const defaultZoom = panelMode === 2 ? 0.86 : panelMode === 1 ? 0.9 : 0.68;
+  const defaultZoom = 1;
   const [zoom, setZoom] = useState(defaultZoom);
   const [offset, setOffset] = useState({ x: 18, y: 14 });
   const [drag, setDrag] = useState(null);
   const [tool, setTool] = useState("select");
+  const minZoom = 0.65;
+  const maxZoom = 1.5;
 
   const matches = (stakeholder, context) => {
     return matchesStakeholderRow({ person: stakeholder, ...context }, query, filters);
   };
   const hasActivePersonFilter = query || ["teamType", "location", "level", "influence", "budget", "relationship", "owner", "recency", "opportunities", "tags"].some((key) => filters[key] !== "All");
+  const treeMatches = (stakeholder, context) => matches(stakeholder, stakeholder.context || context) || (stakeholder.reports || []).some((report) => treeMatches(report, context));
   const unitVisible = (businessUnit, division) => {
     if (filters.division !== "All" && filters.division !== division.name) return false;
     if (filters.unit !== "All" && filters.unit !== businessUnit.name) return false;
     if (!hasActivePersonFilter) return true;
-    const context = { division: division.name, unit: businessUnit.name, teamType: "Business" };
-    const walk = (stakeholder, teamContext = context) => matches(stakeholder, teamContext) || stakeholder.reports.some((report) => walk(report, teamContext));
-    return walk(businessUnit.lead) || businessUnit.unknownReports.some((stakeholder) => matches(stakeholder, context)) || walk(businessUnit.primaryTechnology, { ...context, teamType: "Technology" });
+    const businessContext = { division: division.name, unit: businessUnit.name, teamType: "Business" };
+    const technologyContext = { ...businessContext, teamType: "Technology" };
+    return businessUnit.businessRoots.some((root) => treeMatches(root, businessContext))
+      || (businessUnit.primaryTechnology && matches(businessUnit.primaryTechnology, technologyContext));
   };
-  const setZoomClamped = (value) => setZoom(Math.min(1.35, Math.max(0.42, value)));
+  const clampZoom = (value) => Math.min(maxZoom, Math.max(minZoom, value));
+  const centeredOffset = (top = 17, scale = zoom) => {
+    if (!viewportRef.current || !worldRef.current) return { x: 18, y: top };
+    const configuredLaneWidth = Number.parseFloat(worldRef.current.style.getPropertyValue("--lane-width"));
+    const worldWidth = viewportRef.current.clientWidth <= 900 && Number.isFinite(configuredLaneWidth)
+      ? configuredLaneWidth
+      : Math.max(worldRef.current.offsetWidth, worldRef.current.scrollWidth);
+    return {
+      x: Math.min(18, Math.round((viewportRef.current.clientWidth - worldWidth * scale) / 2)),
+      y: top,
+    };
+  };
+  const zoomFromCenter = (factor) => {
+    if (!viewportRef.current) return;
+    const next = clampZoom(zoom * factor);
+    const point = { x: viewportRef.current.clientWidth / 2, y: viewportRef.current.clientHeight / 2 };
+    const ratio = next / zoom;
+    setOffset((current) => ({ x: point.x - (point.x - current.x) * ratio, y: point.y - (point.y - current.y) * ratio }));
+    setZoom(next);
+  };
   const fit = () => {
     if (!viewportRef.current || !worldRef.current) return;
-    const next = Math.min((viewportRef.current.clientWidth - 34) / worldRef.current.offsetWidth, (viewportRef.current.clientHeight - 34) / worldRef.current.offsetHeight, 1);
-    setZoomClamped(next);
-    setOffset({ x: 17, y: 17 });
+    const next = Math.min((viewportRef.current.clientWidth - 34) / Math.max(worldRef.current.offsetWidth, worldRef.current.scrollWidth), (viewportRef.current.clientHeight - 34) / Math.max(worldRef.current.offsetHeight, worldRef.current.scrollHeight), 1);
+    const fittedZoom = clampZoom(next);
+    setZoom(fittedZoom);
+    setOffset(centeredOffset(17, fittedZoom));
   };
-  const reset = () => { setZoom(defaultZoom); setOffset({ x: 18, y: 14 }); };
+  const reset = () => { setZoom(defaultZoom); setOffset(centeredOffset(14)); };
   useEffect(() => {
     setZoom(defaultZoom);
     setOffset({ x: 18, y: 14 });
@@ -334,7 +339,7 @@ function MapCanvas({ data, query, filters, onSelect, editMode, panelMode, select
     event.preventDefault();
     const rect = viewportRef.current.getBoundingClientRect();
     const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-    const next = Math.min(1.35, Math.max(0.42, zoom * (event.deltaY > 0 ? 0.92 : 1.08)));
+    const next = clampZoom(zoom * (event.deltaY > 0 ? 0.92 : 1.08));
     const ratio = next / zoom;
     setOffset({ x: pointer.x - (pointer.x - offset.x) * ratio, y: pointer.y - (pointer.y - offset.y) * ratio });
     setZoom(next);
@@ -345,22 +350,37 @@ function MapCanvas({ data, query, filters, onSelect, editMode, panelMode, select
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const pointerMove = (event) => drag && setOffset({ x: event.clientX - drag.x, y: event.clientY - drag.y });
+  const visibleDivisions = data.divisions.filter((division) => filters.division === "All" || filters.division === division.name);
+  const branchSlots = (stakeholder) => {
+    const reports = stakeholder?.reports || [];
+    return reports.length ? reports.reduce((total, report) => total + branchSlots(report), 0) : 1;
+  };
+  const widestBusinessRow = Math.max(1, ...visibleDivisions.flatMap((division) => division.units
+    .filter((businessUnit) => unitVisible(businessUnit, division))
+    .map((businessUnit) => businessUnit.businessRoots.reduce((total, root) => total + branchSlots(root), 0))));
+  const laneWidth = Math.max(552, 188 + widestBusinessRow * 172);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setOffset(centeredOffset(14)));
+    return () => cancelAnimationFrame(frame);
+  }, [data.podHead?.id, laneWidth, visibleDivisions.length]);
   return (
     <div className={`map-viewport ${drag ? "dragging" : ""} ${editMode ? "edit-mode" : ""}`} ref={viewportRef} onWheel={onWheel} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)}>
       <div className="canvas-toolbar">
         <button className={tool === "select" ? "active" : ""} onClick={() => setTool("select")} title="Select"><MousePointer2 /></button>
         <button className={tool === "pan" ? "active" : ""} onClick={() => setTool("pan")} title="Pan"><Hand /></button>
-        <button onClick={() => setZoomClamped(zoom * 1.12)} title="Zoom in"><ZoomIn /></button>
-        <button onClick={() => setZoomClamped(zoom / 1.12)} title="Zoom out"><ZoomOut /></button>
+        <button onClick={() => zoomFromCenter(1.12)} disabled={zoom >= maxZoom} title="Zoom in" aria-label="Zoom in"><ZoomIn /></button>
+        <button onClick={() => zoomFromCenter(1 / 1.12)} disabled={zoom <= minZoom} title="Zoom out" aria-label="Zoom out"><ZoomOut /></button>
         <button onClick={fit} title="Fit to screen"><Focus /></button>
         <button onClick={reset} title="Reset view"><RotateCcw /></button>
         <span>{Math.round(zoom * 100)}%</span>
       </div>
-      <div className="map-world" ref={worldRef} style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
-        <div className="division-grid">
-          {data.divisions.map((division) => <DivisionLane key={division.id} division={division} onSelect={onSelect} matches={matches} unitVisible={unitVisible} selectedId={selectedId} />)}
+      <div className="map-world" ref={worldRef} style={{ "--lane-width": `${laneWidth}px`, transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
+        <PodHierarchyHeader podHead={data.podHead} divisions={visibleDivisions} laneWidth={laneWidth} onSelect={onSelect} matches={matches} selectedId={selectedId} />
+        <div className="division-grid" style={{ "--division-count": Math.max(1, visibleDivisions.length), "--lane-width": `${laneWidth}px` }}>
+          {visibleDivisions.map((division) => <DivisionLane key={division.id} division={division} onSelect={onSelect} matches={matches} unitVisible={unitVisible} selectedId={selectedId} />)}
         </div>
-        <EnterpriseFunctions groups={data.enterprise} onSelect={onSelect} matches={matches} selectedId={selectedId} />
+        {(filters.division === "All" || filters.division === "Enterprise Functions") && <EnterpriseFunctions groups={data.enterprise.filter((group) => filters.unit === "All" || filters.unit === group.name)} onSelect={onSelect} matches={matches} selectedId={selectedId} />}
+        {!data.divisions.length && !data.enterprise.length && <p className="empty-note">No canonical stakeholders are available for this pod.</p>}
       </div>
       <MiniMap data={data} zoom={zoom} offset={offset} />
       <div className="canvas-hint">Drag to pan · Scroll to zoom</div>
@@ -370,7 +390,7 @@ function MapCanvas({ data, query, filters, onSelect, editMode, panelMode, select
 
 const formatDate = (value, emptyValue = "Not scheduled") => formatBackendDate(value, { month: "short", day: "numeric", year: "numeric" }, emptyValue);
 const formatMoney = (value) => value == null ? "Not recorded" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
-const slug = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+const slug = (value = "") => String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 
 function resolveProfileMeetingDates(stakeholder, meetings, now = new Date()) {
   const currentTime = now.getTime();
@@ -415,7 +435,7 @@ function ProfileForm({ stakeholder, onSave, onCancel, saving }) {
   </form>;
 }
 
-function LiveDrawerSection({ tab, profile, candidates, editMode, canWrite, confirmChanges, onRefresh, onChanged }) {
+function LiveDrawerSection({ tab, profile, candidates, editMode, canWrite, confirmChanges, onRefresh, onChanged, onMapChanged }) {
   const { stakeholder, team, meetings, notes, documents = [], opportunities } = profile;
   const { lastMeeting, nextMeeting } = resolveProfileMeetingDates(stakeholder, meetings);
   const [panel, setPanel] = useState("");
@@ -435,7 +455,7 @@ function LiveDrawerSection({ tab, profile, candidates, editMode, canWrite, confi
   const run = async (operation, message) => {
     if (!canWrite) { setError("Your current role cannot change account records."); return; }
     setSaving(true); setError("");
-    try { await operation(); setPanel(""); setEditingNote(null); setEditingDocument(null); await onRefresh(); onChanged(message); }
+    try { await operation(); setPanel(""); setEditingNote(null); setEditingDocument(null); await onRefresh(); onMapChanged?.(stakeholder.id); onChanged(message); }
     catch (requestError) { setError(requestError.message); }
     finally { setSaving(false); }
   };
@@ -452,12 +472,18 @@ function LiveDrawerSection({ tab, profile, candidates, editMode, canWrite, confi
     {meetings.length ? <div className="activity">{meetings.map((item) => <React.Fragment key={item.id}><i /><span><b>{formatDate(item.meeting_date)} · {item.subject}</b>{item.summary || item.outcome}</span></React.Fragment>)}</div> : <p className="empty-note">No meetings recorded.</p>}{error && <div className="form-error">{error}</div>}</div>;
 
   if (tab === "Team") {
-    const managerOptions = candidates.filter((item) => item.id !== stakeholder.id && item.business_unit === stakeholder.business_unit);
-    const unitId = `${slug(stakeholder.pod)}-${slug(stakeholder.division)}-${slug(stakeholder.business_unit)}`;
+    const managerOptions = candidates.filter((item) => item.id !== stakeholder.id);
+    const unitId = stakeholder.division && stakeholder.business_unit
+      ? `${slug(stakeholder.pod)}-${slug(stakeholder.division)}-${slug(stakeholder.business_unit)}`
+      : null;
+    const governedManager = stakeholder.organizational_role === "Pod Head"
+      || ["Division Head", "Business Unit Head", "Enterprise Function Lead"].includes(stakeholder.organizational_role)
+      || team.is_primary_technology;
     return <div className="drawer-tab-content team-tab"><div className="section-title"><h4>Reporting structure</h4>{editMode && canWrite && <span className="edit-chip">Editing</span>}</div>
-      <label>Manager</label>{editMode && canWrite ? <div className="inline-editor"><select value={managerId} onChange={(event) => setManagerId(event.target.value)}><option value="">Reporting line unknown</option>{managerOptions.map((item) => <option key={item.id} value={item.id}>{item.name} — {item.title}</option>)}</select><button className="primary-action" disabled={saving || managerId === (team.manager?.id || "")} onClick={() => runOrganizationChange(() => api.updateReportingLine({ report_id: stakeholder.id, manager_id: managerId || null, reason: "Updated in stakeholder map" }), "Reporting line saved")}>Save</button></div> : <div className="team-manager">{team.manager ? `${team.manager.name} — ${team.manager.title}` : "Reporting line not confirmed"}</div>}
+      <label>Manager</label>{editMode && canWrite && !governedManager ? <div className="inline-editor"><SearchableSelect ariaLabel="Manager" value={managerId} onChange={setManagerId} options={managerOptions.map((item) => ({ ...item, label: `${item.name} — ${item.title}` }))} placeholder="Select a manager" /><button className="primary-action" disabled={saving || !managerId || managerId === (team.manager?.id || "")} onClick={() => runOrganizationChange(() => api.updateReportingLine({ report_id: stakeholder.id, manager_id: managerId, reason: "Updated in stakeholder map" }), "Reporting line saved")}>Save</button></div> : <div className="team-manager">{team.manager ? `${team.manager.name} — ${team.manager.title}` : stakeholder.organizational_role === "Pod Head" ? "Top of pod hierarchy" : "Governed organization assignment"}</div>}
+      {governedManager && stakeholder.organizational_role !== "Pod Head" && <p className="editing-hint">This reporting line is governed by the organization structure.</p>}
       <label>Direct reports <span>{team.direct_reports.length}</span></label>{team.direct_reports.length ? <div className="report-list">{team.direct_reports.map((report, index) => <div key={report.id}><i>{index === team.direct_reports.length - 1 ? "└" : "├"}</i><span><b>{report.name}</b><small>{report.title}</small></span></div>)}</div> : <p className="empty-note">No confirmed direct reports.</p>}
-      {stakeholder.team_type === "Technology" && <div className="primary-tech-card"><b>{team.is_primary_technology ? "Primary technology stakeholder" : "Technology team member"}</b><p>{team.is_primary_technology ? "This person is the visible technology owner for the business unit." : "This person is in the full team but is not the unit's primary technology owner."}</p>{editMode && canWrite && !team.is_primary_technology && <button className="primary-action" disabled={saving} onClick={() => runOrganizationChange(() => api.updatePrimaryTechnology(unitId, { stakeholder_id: stakeholder.id, reason: "Updated in stakeholder map" }), "Primary technology owner updated")}>Make primary technology</button>}</div>}
+      {stakeholder.team_type === "Technology" && <div className="primary-tech-card"><b>{team.is_primary_technology ? "Primary technology stakeholder" : "Technology team member"}</b><p>{team.is_primary_technology ? "This person is the designated technology manager shown on the map." : "This person remains available in search, list view, profiles, and the primary manager's team, but is intentionally omitted from the visual map."}</p>{editMode && canWrite && !team.is_primary_technology && <button className="primary-action" disabled={saving} onClick={() => runOrganizationChange(() => api.updatePrimaryTechnology(unitId, { stakeholder_id: stakeholder.id, reason: "Updated in stakeholder map" }), "Primary technology owner updated")}>Make primary technology</button>}</div>}
       {!editMode && canWrite && <p className="editing-hint">Turn on <b>Edit map</b> to change reporting lines and technology ownership.</p>}{!canWrite && <p className="editing-hint"><ShieldCheck/> Organization data is read only for your current role.</p>}{error && <div className="form-error" role="alert">{error}</div>}</div>;
   }
 
@@ -497,10 +523,10 @@ function LiveDrawerSection({ tab, profile, candidates, editMode, canWrite, confi
 
   if (tab === "Bio") return <div className="drawer-tab-content"><div className="section-title"><h4>Biography</h4>{canWrite && <button onClick={() => setPanel("profile")}><Pencil /> Edit</button>}</div><p>{stakeholder.biography || "No biography has been added."}</p><h4>Areas of expertise</h4><div className="drawer-tags">{(stakeholder.tags || []).map((tagName) => <span key={tagName}>{tagName}</span>)}</div></div>;
 
-  return <div className="drawer-tab-content overview-tab"><dl><dt>Division</dt><dd>{stakeholder.division}</dd><dt>Business unit</dt><dd>{stakeholder.business_unit}</dd><dt>Team</dt><dd>{stakeholder.team_type}</dd><dt>Location</dt><dd>{stakeholder.location}</dd><dt>Level</dt><dd>{stakeholder.level}</dd><dt>Last meeting</dt><dd>{formatDate(lastMeeting, "Not recorded")}</dd><dt>Next meeting</dt><dd>{formatDate(nextMeeting)}</dd><dt>Capco owner</dt><dd className="link-value">{stakeholder.capco_owner || "Unassigned"}</dd></dl><div className="drawer-divider" /><div className="section-title"><span>Stakeholder profile</span>{canWrite && <button onClick={() => setPanel("profile")}><Pencil /> Edit</button>}</div><div className="profile-fields"><span>Role</span><b>{stakeholder.is_buyer ? "Buyer" : stakeholder.is_influencer ? "Influencer" : "Stakeholder"}</b><span>Has budget</span><b>{stakeholder.is_budget_holder ? "Yes" : "No"}</b><span>Budget amount</span><b>{formatMoney(stakeholder.budget_amount)}</b><span>Relationship</span><b>{stakeholder.relationship_strength}</b></div><div className="drawer-divider" /><h4>Latest intelligence</h4><p>{notes[0]?.body || stakeholder.biography || "No relationship intelligence recorded."}</p></div>;
+  return <div className="drawer-tab-content overview-tab"><dl><dt>Division</dt><dd>{stakeholder.division || "Pod leadership"}</dd><dt>Business unit</dt><dd>{stakeholder.business_unit || "Not applicable"}</dd><dt>Team</dt><dd>{stakeholder.team_type}</dd><dt>Location</dt><dd>{stakeholder.location || "Not recorded"}</dd><dt>Level</dt><dd>{stakeholder.level}</dd><dt>Last meeting</dt><dd>{formatDate(lastMeeting, "Not recorded")}</dd><dt>Next meeting</dt><dd>{formatDate(nextMeeting)}</dd><dt>Capco owner</dt><dd className="link-value">{stakeholder.capco_owner || "Unassigned"}</dd></dl><div className="drawer-divider" /><div className="section-title"><span>Stakeholder profile</span>{canWrite && <button onClick={() => setPanel("profile")}><Pencil /> Edit</button>}</div><div className="profile-fields"><span>Role</span><b>{stakeholder.is_buyer ? "Buyer" : stakeholder.is_influencer ? "Influencer" : "Stakeholder"}</b><span>Has budget</span><b>{stakeholder.is_budget_holder ? "Yes" : "No"}</b><span>Budget amount</span><b>{formatMoney(stakeholder.budget_amount)}</b><span>Relationship</span><b>{stakeholder.relationship_strength}</b></div><div className="drawer-divider" /><h4>Latest intelligence</h4><p>{notes[0]?.body || stakeholder.biography || "No relationship intelligence recorded."}</p></div>;
 }
 
-function LiveStakeholderDrawer({ selected, pod, editMode, canWrite, confirmChanges, requestedTab, onCollapse }) {
+function LiveStakeholderDrawer({ selected, pod, editMode, canWrite, confirmChanges, requestedTab, onCollapse, onMapChanged }) {
   const [tab, setTab] = useState("Overview");
   const [profile, setProfile] = useState(null);
   const [candidates, setCandidates] = useState([]);
@@ -514,7 +540,7 @@ function LiveStakeholderDrawer({ selected, pod, editMode, canWrite, confirmChang
     try {
       const nextProfile = await api.getStakeholderProfile(selected.person.id);
       if (nextProfile.stakeholder.id !== selected.person.id || nextProfile.stakeholder.pod !== pod) throw new Error("Canonical stakeholder linkage mismatch");
-      const nextCandidates = await api.getStakeholders({ pod, business_unit: nextProfile.stakeholder.business_unit, limit: 500 });
+      const nextCandidates = await api.getStakeholders({ pod, limit: 500 });
       setProfile(nextProfile); setCandidates(nextCandidates);
     } catch (requestError) {
       setProfile(null);
@@ -529,7 +555,7 @@ function LiveStakeholderDrawer({ selected, pod, editMode, canWrite, confirmChang
   if (!selected) return <aside className="stakeholder-drawer empty-drawer"><UsersRound /><h3>No stakeholder selected</h3><p>Select a node on the map to view relationship intelligence.</p></aside>;
   const person = profile?.stakeholder || selected.person;
   const tags = person.tags || selected.person.tags || [];
-  return <aside className="stakeholder-drawer"><button className="drawer-close" onClick={onCollapse} aria-label="Collapse stakeholder drawer" title="Collapse stakeholder drawer"><PanelRightClose /></button><section className="drawer-profile"><div className="profile-avatar">{initials(person.name)}<sup>{selected.person.capcoContacts || 1}</sup></div><div><h2>{person.name}</h2>{(person.is_buyer ?? selected.person.buyer) && <span className="buyer-badge">Buyer / decision-maker</span>}<strong>{person.title}</strong><p>{person.division || selected.division} · {person.business_unit || selected.unit}<br />{person.location}</p></div></section><div className="drawer-tags">{tags.slice(0, 4).map((tagName) => <span key={tagName}>{tagName}</span>)}</div>{editMode && canWrite && <div className="edit-mode-banner"><Pencil /> Map editing is on</div>}<nav className="drawer-tabs">{drawerTabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>{notice && <div className="save-notice" role="status" aria-live="polite">{notice}</div>}{loading && !profile && <div className="api-state"><span className="loading-dot" /> Loading stakeholder intelligence...</div>}{error && !loading && <div className="api-state error-state" role="alert"><b>Backend profile unavailable</b><span>{error}</span><button onClick={loadProfile}>Retry</button></div>}{profile && <LiveDrawerSection tab={tab} profile={profile} candidates={candidates} editMode={editMode} canWrite={canWrite} confirmChanges={confirmChanges} onRefresh={loadProfile} onChanged={setNotice} />}</aside>;
+  return <aside className="stakeholder-drawer"><button className="drawer-close" onClick={onCollapse} aria-label="Collapse stakeholder drawer" title="Collapse stakeholder drawer"><PanelRightClose /></button><section className="drawer-profile"><div className="profile-avatar">{initials(person.name)}<sup>{selected.person.capcoContacts || 1}</sup></div><div><h2>{person.name}</h2>{(person.is_buyer ?? selected.person.buyer) && <span className="buyer-badge">Buyer / decision-maker</span>}<strong>{person.title}</strong><p>{person.division || selected.division || "Pod leadership"} · {person.business_unit || selected.unit || "Not applicable"}<br />{person.location || "Not recorded"}</p></div></section><div className="drawer-tags">{tags.slice(0, 4).map((tagName) => <span key={tagName}>{tagName}</span>)}</div>{editMode && canWrite && <div className="edit-mode-banner"><Pencil /> Map editing is on</div>}<nav className="drawer-tabs">{drawerTabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>{notice && <div className="save-notice" role="status" aria-live="polite">{notice}</div>}{loading && !profile && <div className="api-state"><span className="loading-dot" /> Loading stakeholder intelligence...</div>}{error && !loading && <div className="api-state error-state" role="alert"><b>Backend profile unavailable</b><span>{error}</span><button onClick={loadProfile}>Retry</button></div>}{profile && <LiveDrawerSection tab={tab} profile={profile} candidates={candidates} editMode={editMode} canWrite={canWrite} confirmChanges={confirmChanges} onRefresh={loadProfile} onChanged={setNotice} onMapChanged={onMapChanged} />}</aside>;
 }
 
 function ControlRail({ pod, setPod, view, setView, filters, setFilters, data, filterOptions, onAdd, onCollapse, canWrite }) {
@@ -658,18 +684,20 @@ function AccountEntityDialog({ detail, onClose, onStakeholder, onEmployee, onEng
 function AddStakeholderModal({ pod, data, onClose, onCreated }) {
   const dialogRef = useRef(null);
   useDialogAccessibility(dialogRef, onClose);
-  const [form, setForm] = useState({ name: "", title: "", division: data.divisions[0].name, business_unit: data.divisions[0].units[0].name, team_type: "Business" });
+  const [form, setForm] = useState({ name: "", title: "", division: data.people[0]?.division || "Front Office", business_unit: data.people[0]?.businessUnit || "Equities", team_type: "Business", manager_id: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const division = data.divisions.find((item) => item.name === form.division) || data.divisions[0];
+  const divisions = [...new Set(data.people.map((person) => person.division).filter((value) => value && value !== "Enterprise Functions"))];
+  const units = [...new Set(data.people.filter((person) => person.division === form.division).map((person) => person.businessUnit).filter(Boolean))];
+  const managerOptions = data.people.map((person) => ({ ...person, label: `${person.name} — ${person.title} (${person.division || "Pod leadership"} / ${person.businessUnit || "Not applicable"})` }));
   const update = (key, value) => setForm((current) => ({ ...current, [key]: value }));
   const submit = async (event) => {
     event.preventDefault(); setSaving(true); setError("");
-    try { const record = await api.createStakeholder({ ...form, pod }); onCreated({ person: { ...record, id: record.id, reports: [], tags: [], capcoContacts: 0, relationship: "Developing", lastMeeting: "Not recorded", nextMeeting: "Not scheduled", country: "US" }, division: record.division, unit: record.business_unit, teamType: record.team_type }); onClose(); }
+    try { const record = await api.createStakeholder({ ...form, pod, manager_id: form.manager_id || null }); onCreated(record); onClose(); }
     catch (requestError) { setError(requestError.message); }
     finally { setSaving(false); }
   };
-  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="add-stakeholder-title" onSubmit={submit}><button type="button" className="modal-close" onClick={onClose} aria-label="Close add stakeholder dialog"><X /></button><h2 id="add-stakeholder-title">Add stakeholder</h2><p>Create a new organizational assignment.</p><label>Full name<input data-dialog-initial-focus required value={form.name} onChange={(event) => update("name", event.target.value)} /></label><label>Title<input required value={form.title} onChange={(event) => update("title", event.target.value)} /></label><label>Division<select value={form.division} onChange={(event) => { const next = event.target.value; const nextDivision = data.divisions.find((item) => item.name === next); setForm({ ...form, division: next, business_unit: nextDivision.units[0].name }); }}>{data.divisions.map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label>Business unit<select value={form.business_unit} onChange={(event) => update("business_unit", event.target.value)}>{division.units.map((item) => <option key={item.id}>{item.name}</option>)}</select></label><label>Team<select value={form.team_type} onChange={(event) => update("team_type", event.target.value)}><option>Business</option><option>Technology</option></select></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="modal-submit" disabled={saving}>{saving ? "Saving…" : "Add person"}</button></form></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><form ref={dialogRef} className="modal" role="dialog" aria-modal="true" aria-labelledby="add-stakeholder-title" onSubmit={submit}><button type="button" className="modal-close" onClick={onClose} aria-label="Close add stakeholder dialog"><X /></button><h2 id="add-stakeholder-title">Add stakeholder</h2><p>Create a new organizational assignment.</p><label>Full name<input data-dialog-initial-focus required value={form.name} onChange={(event) => update("name", event.target.value)} /></label><label>Title<input required value={form.title} onChange={(event) => update("title", event.target.value)} /></label><label>Division<select value={form.division} onChange={(event) => { const next = event.target.value; const nextUnits = [...new Set(data.people.filter((person) => person.division === next).map((person) => person.businessUnit).filter(Boolean))]; setForm({ ...form, division: next, business_unit: nextUnits[0] || "" }); }}>{divisions.map((item) => <option key={item}>{item}</option>)}</select></label><label>Business unit<select value={form.business_unit} onChange={(event) => update("business_unit", event.target.value)}>{units.map((item) => <option key={item}>{item}</option>)}</select></label><label>Team<select value={form.team_type} onChange={(event) => update("team_type", event.target.value)}><option>Business</option><option>Technology</option></select></label><label>Manager <small>Optional selection; defaults to the governed subdomain manager.</small><SearchableSelect ariaLabel="Manager for new stakeholder" value={form.manager_id} onChange={(value) => update("manager_id", value)} options={managerOptions} allowClear placeholder="Use governed default" /></label>{error && <div className="form-error" role="alert">{error}</div>}<button className="modal-submit" disabled={saving}>{saving ? "Saving…" : "Add person"}</button></form></div>;
 }
 
 function GlobalSearchDialog({ pod, onClose, onSelect }) {
@@ -945,7 +973,7 @@ function App() {
         ) : isResourcingView ? (
           <ResourcingView pod={pod} canWrite={!!session?.permissions?.write} canManageCommercial={!!session?.roles?.some((role) => ["Account Manager", "Account Admin"].includes(role))} currentEmployeeId={session?.employee_id || ""} />
         ) : isManageData ? (
-          <DataManagement pod={pod} initialSection={dataInitialSection} focus={dataFocus} canWrite={session?.permissions?.write} />
+          <DataManagement pod={pod} initialSection={dataInitialSection} focus={dataFocus} canWrite={session?.permissions?.write} canAdmin={!!session?.roles?.includes("Account Admin")} />
         ) : topSection === "Settings" ? (
           <SettingsView preferences={preferences} session={session} onChange={(changes) => setPreferences((current) => saveWorkspacePreferences({ ...current, ...changes }))} onReset={() => { setPreferences(resetWorkspacePreferences()); setFilters(DEFAULT_FILTERS); setView("Map View"); setTopSection("Stakeholder Map"); }} />
         ) : isExecutiveView ? (
@@ -971,9 +999,9 @@ function App() {
           <SecondaryView type={view} rows={filteredRows} total={rows.length} onSelect={select} pod={mapPod} coverageState={coverageState} filters={filters} onRetryCoverage={() => setCoverageReload((value) => value + 1)} />
         )}
       </main>
-      {showMapChrome && <LiveStakeholderDrawer selected={selected} pod={mapPod} editMode={editMode} canWrite={!!session?.permissions?.write} confirmChanges={preferences.confirmChanges} requestedTab={drawerRequest} onCollapse={() => setRightCollapsed(true)} />}
+      {showMapChrome && <LiveStakeholderDrawer selected={selected} pod={mapPod} editMode={editMode} canWrite={!!session?.permissions?.write} confirmChanges={preferences.confirmChanges} requestedTab={drawerRequest} onCollapse={() => setRightCollapsed(true)} onMapChanged={(stakeholderId) => { setMapFocusRequest({ id: stakeholderId, key: Date.now() }); setMapReload((value) => value + 1); }} />}
       {showMapChrome && rightCollapsed && selected && <button className="sidebar-reopen reopen-right" onClick={() => setRightCollapsed(false)} aria-label="Open stakeholder drawer" title="Open stakeholder drawer"><PanelRightOpen /></button>}
-      {addOpen && mapPod && <AddStakeholderModal pod={mapPod} data={data} onClose={() => setAddOpen(false)} onCreated={setSelected} />}
+      {addOpen && mapPod && <AddStakeholderModal pod={mapPod} data={data} onClose={() => setAddOpen(false)} onCreated={(record) => { select(adaptBackendStakeholder(record), { division: record.division, unit: record.business_unit, teamType: record.team_type }, { focus: true }); setMapReload((value) => value + 1); }} />}
       {searchOpen && <GlobalSearchDialog pod={pod} onClose={() => setSearchOpen(false)} onSelect={openSearchResult} />}
       {notificationsOpen && <NotificationCenter pod={pod} onClose={() => setNotificationsOpen(false)} onSelect={openNotification} />}
       {accountDetail && <AccountEntityDialog

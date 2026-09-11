@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sqlalchemy import (
     JSON, Boolean, CheckConstraint, Column, Date, DateTime, ForeignKey, Index,
-    Integer, MetaData, Numeric, String, Table, Text, UniqueConstraint, func,
+    ForeignKeyConstraint, Integer, MetaData, Numeric, String, Table, Text, UniqueConstraint, func,
 )
 
 
@@ -20,6 +20,7 @@ pods = Table(
     Column("id", String(80), primary_key=True),
     Column("account_id", String(80), ForeignKey("accounts.id", ondelete="RESTRICT"), nullable=False),
     Column("name", String(120), nullable=False),
+    Column("head_stakeholder_id", String(180)),
     UniqueConstraint("account_id", "name", name="uq_pods_account_name"),
 )
 
@@ -66,7 +67,7 @@ stakeholder_assignments = Table(
     Column("id", String(220), primary_key=True),
     Column("stakeholder_id", String(180), ForeignKey("stakeholders.id", ondelete="CASCADE"), nullable=False),
     Column("pod_id", String(80), ForeignKey("pods.id", ondelete="RESTRICT"), nullable=False),
-    Column("division_id", String(160), ForeignKey("divisions.id", ondelete="RESTRICT"), nullable=False),
+    Column("division_id", String(160), ForeignKey("divisions.id", ondelete="RESTRICT")),
     Column("business_unit_id", String(220), ForeignKey("business_units.id", ondelete="RESTRICT")),
     Column("team_type", String(30), nullable=False),
     Column("organizational_role", String(160), nullable=False),
@@ -86,6 +87,9 @@ stakeholder_assignments = Table(
     CheckConstraint("team_type IN ('Business', 'Technology')", name="ck_assignment_team_type"),
     CheckConstraint("relationship_strength IN ('Strong', 'Medium', 'Developing', 'Unknown')", name="ck_assignment_relationship"),
     CheckConstraint("effective_to IS NULL OR effective_to >= effective_from", name="ck_assignment_dates"),
+    CheckConstraint("organizational_role = 'Pod Head' OR division_id IS NOT NULL", name="ck_assignment_division_scope"),
+    CheckConstraint("manager_stakeholder_id IS NOT NULL OR organizational_role = 'Pod Head'", name="ck_assignment_manager_required"),
+    CheckConstraint("organizational_role != 'Pod Head' OR (division_id IS NULL AND business_unit_id IS NULL AND manager_stakeholder_id IS NULL)", name="ck_assignment_pod_head_scope"),
 )
 Index("idx_assignments_scope", stakeholder_assignments.c.pod_id, stakeholder_assignments.c.division_id, stakeholder_assignments.c.business_unit_id, stakeholder_assignments.c.is_current)
 Index("idx_assignments_manager", stakeholder_assignments.c.manager_stakeholder_id, stakeholder_assignments.c.is_current)
@@ -100,6 +104,9 @@ enterprise_functions = Table(
     Column("lead_stakeholder_id", String(180), ForeignKey("stakeholders.id", ondelete="RESTRICT"), nullable=False),
     UniqueConstraint("pod_id", "name", name="uq_enterprise_function_pod_name"),
 )
+
+# Added after both tables are declared to avoid a Python declaration cycle.
+pods.append_constraint(ForeignKeyConstraint([pods.c.head_stakeholder_id], [stakeholders.c.id], ondelete="RESTRICT", name="fk_pod_head"))
 
 meetings = Table(
     "meetings", metadata,

@@ -59,6 +59,12 @@ DIVISION_HEADS = {
     "MSIM": ["Victor Shaw", "Sofia Martin", "Grace Lee"],
 }
 
+POD_HEADS = {
+    "ISG": ("Dan Simkowitz", "Co-President; responsible for Institutional Securities Group"),
+    "Wealth Management": ("Jed Finn", "Head of Wealth Management"),
+    "MSIM": ("Ben Huneke", "Head of Morgan Stanley Investment Management"),
+}
+
 UNIT_LEADS = [
     "Emily Davis", "Michael Lowe", "Tom Green", "Laura Hill", "Luca Chen", "Maya Wong",
     "Noah Patel", "Jordan Tan", "Katie Thompson", "Ben Wilson", "Nicole Martin", "Olivia Stone",
@@ -155,6 +161,7 @@ class StakeholderRepository:
     def __init__(self, seed_data: bool = True) -> None:
         self._lock = RLock()
         self.stakeholders: dict[str, Stakeholder] = {}
+        self.pod_heads: dict[str, str] = {}
         self.units: dict[str, dict] = {}
         self.divisions: dict[str, dict] = {}
         self.enterprise: dict[str, list[dict]] = defaultdict(list)
@@ -201,6 +208,24 @@ class StakeholderRepository:
         global_unit_index = 0
 
         for pod_index, (pod, division_structure) in enumerate(POD_STRUCTURE.items()):
+            pod_head_name, pod_head_title = POD_HEADS[pod]
+            pod_head = self._seed_person(
+                stakeholder_id=f"{slug(pod)}-pod-head",
+                name=pod_head_name,
+                title=pod_head_title,
+                pod=pod,
+                division=None,
+                unit=None,
+                team_type="Business",
+                role="Pod Head",
+                level="Executive Leadership",
+                location=("Not recorded", ""),
+                relationship="Strong",
+                buyer=True,
+                budget_holder=True,
+                tags=[pod, "Executive Leadership"],
+            )
+            self.pod_heads[pod] = pod_head.id
             for division_index, (division_name, unit_names) in enumerate(division_structure.items()):
                 division_id = f"{slug(pod)}-{slug(division_name)}"
                 head_name = DIVISION_HEADS[pod][division_index]
@@ -216,6 +241,7 @@ class StakeholderRepository:
                     level="Managing Director",
                     location=LOCATIONS[(pod_index + division_index) % len(LOCATIONS)],
                     relationship="Strong",
+                    manager_id=pod_head.id,
                     buyer=True,
                     budget_holder=True,
                     tags=["Strategy", "Transformation", "Executive Leadership"],
@@ -299,24 +325,6 @@ class StakeholderRepository:
                         business_ids.append(report.id)
 
                     unknown_ids: list[str] = []
-                    if unit_index % 4 == 2:
-                        unknown = self._seed_person(
-                            stakeholder_id=f"{unit_id}-reporting-unknown",
-                            name=next(name_stream),
-                            title=self._specialist_title(unit_name, 2),
-                            pod=pod,
-                            division=division_name,
-                            unit=unit_name,
-                            team_type="Business",
-                            role="Business Stakeholder",
-                            level="Vice President",
-                            manager_id=None,
-                            location=next(location_stream),
-                            relationship="Developing",
-                            tags=tags,
-                        )
-                        unknown_ids.append(unknown.id)
-                        business_ids.append(unknown.id)
 
                     tech_name = next(tech_stream)
                     primary_tech = self._seed_person(
@@ -329,7 +337,7 @@ class StakeholderRepository:
                         team_type="Technology",
                         role="Primary Technology Stakeholder",
                         level="Executive Director" if unit_index % 4 == 0 else "Vice President",
-                        manager_id=None,
+                        manager_id=lead.id,
                         is_primary=True,
                         location=next(location_stream),
                         relationship="Strong" if unit_index % 2 == 0 else "Medium",
@@ -378,7 +386,7 @@ class StakeholderRepository:
 
     def _seed_person(
         self,
-        *, stakeholder_id: str, name: str, title: str, pod: str, division: str, unit: str,
+        *, stakeholder_id: str, name: str, title: str, pod: str, division: Optional[str], unit: Optional[str],
         team_type: str, role: str, level: str, location: tuple[str, str], relationship: str,
         manager_id: Optional[str] = None, is_primary: bool = False, buyer: bool = False,
         budget_holder: bool = False, tags: Optional[list[str]] = None,
@@ -441,6 +449,7 @@ class StakeholderRepository:
                 team_type="Business",
                 role="Enterprise Function Lead",
                 level="Managing Director" if function_index != 1 else "Executive Director",
+                manager_id=self.pod_heads[pod],
                 location=next(locations),
                 relationship="Strong",
                 buyer=function_index != 1,
@@ -469,7 +478,10 @@ class StakeholderRepository:
 
     def _seed_activity(self) -> None:
         now = self.now()
-        prioritized = [s for s in self.stakeholders.values() if s.is_primary_technology or s.is_buyer]
+        prioritized = [
+            s for s in self.stakeholders.values()
+            if s.organizational_role != "Pod Head" and (s.is_primary_technology or s.is_buyer)
+        ]
         meeting_subjects = [
             "Platform modernization roadmap", "AI-enabled workflow discovery", "Data quality and controls review",
             "Cloud migration planning", "Operating model alignment", "Quarterly relationship review",
@@ -634,9 +646,9 @@ class StakeholderRepository:
             needle = search.casefold()
             records = [
                 item for item in records
-                if needle in " ".join([item.name, item.title, item.division, item.business_unit, " ".join(item.tags)]).casefold()
+                if needle in " ".join(filter(None, [item.name, item.title, item.division, item.business_unit, " ".join(item.tags)])).casefold()
             ]
-        return sorted(records, key=lambda item: (item.pod, item.division, item.business_unit, item.name))
+        return sorted(records, key=lambda item: (item.pod, item.division or "", item.business_unit or "", item.name))
 
     def build_map(self, pod: str, **filters) -> MapResponse:
         if pod not in POD_STRUCTURE:
@@ -681,6 +693,7 @@ class StakeholderRepository:
         return MapResponse(
             pod=pod,
             generated_at=self.now(),
+            pod_head_stakeholder_id=self.pod_heads.get(pod),
             divisions=divisions,
             stakeholders=selected,
             reporting_lines=reporting_lines,
@@ -688,15 +701,55 @@ class StakeholderRepository:
             filters_applied=filters,
         )
 
+    def _unit_for_stakeholder(self, stakeholder_id: str) -> Optional[dict]:
+        return next((unit for unit in self.units.values() if stakeholder_id in unit["business_stakeholder_ids"] or stakeholder_id in unit["technology_stakeholder_ids"]), None)
+
+    def _business_head_id(self, unit: dict) -> Optional[str]:
+        return next((stakeholder_id for stakeholder_id in unit["business_stakeholder_ids"] if self.stakeholders[stakeholder_id].organizational_role == "Business Unit Head"), unit["business_stakeholder_ids"][0] if unit["business_stakeholder_ids"] else None)
+
+    def _enterprise_lead_id(self, person: Stakeholder) -> Optional[str]:
+        group = next((group for group in self.enterprise.get(person.pod, []) if person.id == group["lead_stakeholder_id"] or person.id in group["member_ids"]), None)
+        return group["lead_stakeholder_id"] if group else None
+
+    def _required_structural_manager(self, person: Stakeholder) -> Optional[str]:
+        if person.organizational_role == "Pod Head":
+            return None
+        if person.organizational_role == "Division Head":
+            return self.pod_heads.get(person.pod)
+        if person.organizational_role == "Enterprise Function Lead":
+            return self.pod_heads.get(person.pod)
+        if person.division == "Enterprise Functions":
+            return self._enterprise_lead_id(person)
+        unit = self._unit_for_stakeholder(person.id)
+        if not unit:
+            return None
+        business_head_id = self._business_head_id(unit)
+        if person.organizational_role == "Business Unit Head" or person.is_primary_technology:
+            return next((division["head_stakeholder_id"] for division in self.divisions.values() if division["pod"] == person.pod and division["name"] == person.division), None) if person.organizational_role == "Business Unit Head" else business_head_id
+        if person.team_type == "Technology":
+            return unit["primary_technology_id"] or business_head_id
+        return None
+
     def create_stakeholder(self, payload: StakeholderCreate) -> Stakeholder:
         with self._lock:
             unit_id = self._validate_org(payload.pod, payload.division, payload.business_unit)
-            if payload.manager_id:
-                manager = self.get_stakeholder(payload.manager_id)
-                if manager.pod != payload.pod or manager.business_unit != payload.business_unit:
-                    raise ConflictError("Manager must belong to the same pod and business unit")
             if payload.is_primary_technology and payload.team_type != "Technology":
                 raise ConflictError("Primary technology stakeholder must be on the Technology team")
+            role = payload.organizational_role or f"{payload.team_type} Stakeholder"
+            unit = self.units[unit_id]
+            manager_id = payload.manager_id
+            if not manager_id:
+                if role == "Business Unit Head":
+                    manager_id = next(division["head_stakeholder_id"] for division in self.divisions.values() if division["pod"] == payload.pod and division["name"] == payload.division)
+                elif payload.team_type == "Technology":
+                    manager_id = self._business_head_id(unit) if payload.is_primary_technology else unit["primary_technology_id"] or self._business_head_id(unit)
+                else:
+                    manager_id = self._business_head_id(unit)
+            if not manager_id:
+                raise ConflictError("Every stakeholder must have a manager")
+            manager = self.get_stakeholder(manager_id)
+            if manager.pod != payload.pod:
+                raise ConflictError("Manager must belong to the same pod")
             stakeholder_id = f"stakeholder-{uuid4().hex[:12]}"
             now = self.now()
             record = Stakeholder(
@@ -708,11 +761,11 @@ class StakeholderRepository:
                 division=payload.division,
                 business_unit=payload.business_unit,
                 team_type=payload.team_type,
-                organizational_role=payload.organizational_role or f"{payload.team_type} Stakeholder",
+                organizational_role=role,
                 level=payload.level,
                 location=payload.location,
                 country_code=payload.country_code,
-                manager_id=payload.manager_id,
+                manager_id=manager_id,
                 is_primary_technology=False,
                 is_buyer=payload.is_buyer,
                 is_influencer=payload.is_influencer,
@@ -749,11 +802,12 @@ class StakeholderRepository:
     def delete_stakeholder(self, stakeholder_id: str) -> None:
         with self._lock:
             record = self.get_stakeholder(stakeholder_id)
+            if stakeholder_id in self.pod_heads.values() or any(division["head_stakeholder_id"] == stakeholder_id for division in self.divisions.values()):
+                raise ConflictError("Assign a replacement organization head before deletion")
             if any(unit["primary_technology_id"] == stakeholder_id for unit in self.units.values()):
                 raise ConflictError("Assign a replacement primary technology stakeholder before deletion")
-            for stakeholder in self.stakeholders.values():
-                if stakeholder.manager_id == stakeholder_id:
-                    stakeholder.manager_id = None
+            if any(stakeholder.manager_id == stakeholder_id for stakeholder in self.stakeholders.values()):
+                raise ConflictError("Reassign direct reports before deleting this stakeholder")
             for unit in self.units.values():
                 for key in ("business_stakeholder_ids", "technology_stakeholder_ids", "reporting_unknown_ids"):
                     unit[key] = [item for item in unit[key] if item != stakeholder_id]
@@ -782,12 +836,20 @@ class StakeholderRepository:
         with self._lock:
             report = self.get_stakeholder(report_id)
             previous = report.manager_id
+            required_manager = self._required_structural_manager(report)
+            if report.organizational_role == "Pod Head":
+                if manager_id is not None:
+                    raise ConflictError("A pod head cannot have a manager")
+            elif manager_id is None:
+                raise ConflictError("Every stakeholder except the pod head must have a manager")
+            elif required_manager and manager_id != required_manager:
+                raise ConflictError("This leadership role has a governed reporting line")
             if manager_id:
                 manager = self.get_stakeholder(manager_id)
                 if manager.id == report.id:
                     raise ConflictError("A stakeholder cannot manage themselves")
-                if manager.pod != report.pod or manager.business_unit != report.business_unit:
-                    raise ConflictError("Reporting lines must remain within the same pod and business unit")
+                if manager.pod != report.pod:
+                    raise ConflictError("Reporting lines must remain within the same pod")
                 cursor_id: Optional[str] = manager.id
                 visited: set[str] = set()
                 while cursor_id:
@@ -799,10 +861,7 @@ class StakeholderRepository:
             report.updated_at = self.now()
             unit = next((item for item in self.units.values() if report.id in item["business_stakeholder_ids"]), None)
             if unit:
-                if manager_id is None and report.id not in unit["reporting_unknown_ids"]:
-                    unit["reporting_unknown_ids"].append(report.id)
-                elif manager_id is not None:
-                    unit["reporting_unknown_ids"] = [item for item in unit["reporting_unknown_ids"] if item != report.id]
+                unit["reporting_unknown_ids"] = [item for item in unit["reporting_unknown_ids"] if item != report.id]
             history = self._add_history(report.id, "Reporting Line", previous, manager_id, reason)
             return {"report_id": report.id, "previous_manager_id": previous, "manager_id": manager_id, "history_id": history.id, "status": "saved"}
 
@@ -819,12 +878,77 @@ class StakeholderRepository:
                 return {"business_unit_id": unit_id, "previous_stakeholder_id": previous, "stakeholder_id": stakeholder_id, "status": "unchanged"}
             if previous in self.stakeholders:
                 self.stakeholders[previous].is_primary_technology = False
+                self.stakeholders[previous].manager_id = stakeholder_id
                 self.stakeholders[previous].updated_at = self.now()
             stakeholder.is_primary_technology = True
+            stakeholder.manager_id = self._business_head_id(unit)
             stakeholder.updated_at = self.now()
+            for report in self.stakeholders.values():
+                if report.id in unit["technology_stakeholder_ids"] and report.id != stakeholder_id and report.manager_id == previous:
+                    report.manager_id = stakeholder_id
+                    report.updated_at = self.now()
             unit["primary_technology_id"] = stakeholder_id
             history = self._add_history(stakeholder_id, "Primary Technology", previous, stakeholder_id, reason)
             return {"business_unit_id": unit_id, "previous_stakeholder_id": previous, "stakeholder_id": stakeholder_id, "history_id": history.id, "status": "saved"}
+
+    def set_pod_head(self, pod: str, stakeholder_id: str, reason: str) -> dict:
+        with self._lock:
+            if pod not in POD_STRUCTURE:
+                raise NotFoundError("Pod not found")
+            stakeholder = self.get_stakeholder(stakeholder_id)
+            if stakeholder.pod != pod:
+                raise ConflictError("Pod head must belong to the same pod")
+            previous = self.pod_heads.get(pod)
+            if previous == stakeholder_id:
+                return {
+                    "pod": pod, "previous_stakeholder_id": previous,
+                    "stakeholder_id": stakeholder_id, "head_stakeholder_id": stakeholder_id,
+                    "status": "unchanged",
+                }
+            if previous in self.stakeholders:
+                previous_head = self.stakeholders[previous]
+                target_unit = self._unit_for_stakeholder(stakeholder_id)
+                governed_roles = {"Pod Head", "Division Head", "Business Unit Head", "Enterprise Function Lead"}
+                if stakeholder.organizational_role != "Pod Head" and (
+                    stakeholder.team_type != "Business" or stakeholder.is_primary_technology
+                    or stakeholder.organizational_role in governed_roles or target_unit is None
+                    or any(item.manager_id == stakeholder_id for item in self.stakeholders.values())
+                ):
+                    raise ConflictError("Select an ungoverned business stakeholder without direct reports as the new pod head")
+                previous_scope = {
+                    "division": stakeholder.division,
+                    "business_unit": stakeholder.business_unit,
+                    "team_type": stakeholder.team_type,
+                    "organizational_role": stakeholder.organizational_role,
+                    "manager_id": stakeholder.manager_id,
+                }
+                if target_unit:
+                    target_unit["business_stakeholder_ids"] = [
+                        previous if item == stakeholder_id else item
+                        for item in target_unit["business_stakeholder_ids"]
+                    ]
+                previous_head.division = previous_scope["division"]
+                previous_head.business_unit = previous_scope["business_unit"]
+                previous_head.team_type = previous_scope["team_type"]
+                previous_head.organizational_role = previous_scope["organizational_role"]
+                previous_head.manager_id = previous_scope["manager_id"]
+                previous_head.updated_at = self.now()
+            stakeholder.division = None
+            stakeholder.business_unit = None
+            stakeholder.team_type = "Business"
+            stakeholder.organizational_role = "Pod Head"
+            stakeholder.level = "Executive Leadership"
+            stakeholder.manager_id = None
+            stakeholder.updated_at = self.now()
+            self.pod_heads[pod] = stakeholder_id
+            for division in self.divisions.values():
+                if division["pod"] == pod and division["head_stakeholder_id"] in self.stakeholders:
+                    self.stakeholders[division["head_stakeholder_id"]].manager_id = stakeholder_id
+            history = self._add_history(stakeholder_id, "Assignment", previous, stakeholder_id, reason)
+            return {
+                "pod": pod, "previous_stakeholder_id": previous, "stakeholder_id": stakeholder_id,
+                "head_stakeholder_id": stakeholder_id, "history_id": history.id, "status": "saved",
+            }
 
     def _add_history(self, stakeholder_id: str, change_type: str, previous: Optional[str], new: Optional[str], reason: str) -> AssignmentHistory:
         history = AssignmentHistory(
@@ -1045,7 +1169,11 @@ class StakeholderRepository:
         records = self.list_stakeholders(pod=pod)
         return {
             "divisions": list(POD_STRUCTURE[pod]),
-            "business_units": sorted({item.business_unit for item in records if item.business_unit != "Division Leadership"}),
+            "business_units": sorted({
+                item.business_unit
+                for item in records
+                if item.business_unit and item.business_unit != "Division Leadership"
+            }),
             "team_types": ["Business", "Technology"],
             "locations": sorted({item.location for item in records}),
             "levels": sorted({item.level for item in records}),

@@ -1,0 +1,95 @@
+.searchable-select {
+  position: relative;
+  min-width: 0;
+  font: inherit;
+}
+
+.searchable-trigger {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #29495e;
+  border: 1px solid #bdccd5;
+  border-radius: 4px;
+  background: #fff;
+  text-align: left;
+}
+
+.searchable-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.searchable-trigger svg { width: 14px; flex: none; }
+
+.searchable-popover {
+  position: absolute;
+  z-index: 230;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max(100%, 260px);
+  max-width: min(420px, calc(100vw - 30px));
+  padding: 6px;
+  border: 1px solid #afc2ce;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 30px #0b273a2b;
+}
+
+.searchable-popover > label {
+  height: 36px;
+  padding: 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #c7d4dc;
+  border-radius: 4px;
+}
+
+.searchable-popover > label svg { width: 14px; color: #4c7188; }
+
+.searchable-popover input {
+  width: 100%;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  outline: 0;
+}
+
+.searchable-popover > [role="listbox"] {
+  max-height: 240px;
+  margin-top: 5px;
+  overflow: auto;
+}
+
+.searchable-popover [role="option"] {
+  width: 100%;
+  min-height: 38px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: 3px;
+  text-align: left;
+}
+
+.searchable-popover [role="option"]:hover,
+.searchable-popover [role="option"].active,
+.searchable-popover [aria-selected="true"] { background: #eaf5fa; }
+
+.searchable-popover [role="option"] > span { display: grid; gap: 1px; }
+.searchable-popover small { color: #718695; }
+.searchable-popover [role="option"] svg { width: 13px; color: #1477aa; }
+.searchable-popover p { margin: 0; padding: 14px; color: #718695; text-align: center; }
+.searchable-chips { margin-bottom: 5px; display: flex; gap: 4px; flex-wrap: wrap; }
+.searchable-chips button { padding: 3px 6px; display: flex; align-items: center; gap: 4px; border-radius: 12px; background: #eaf5fa; color: #315c73; }
+.searchable-chips svg { width: 10px; }
+.searchable-select.disabled { opacity: .65; }

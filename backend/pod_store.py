@@ -429,7 +429,7 @@ class PodOperatingStore:
 
         for pod_index, pod in enumerate(POD_STRUCTURE):
             people = sorted(
-                self._pod_stakeholders(pod),
+                (person for person in self._pod_stakeholders(pod) if person.business_unit),
                 key=lambda item: (not item.is_budget_holder, not item.is_buyer, not item.is_primary_technology, item.name),
             )
             pod_opportunities = self._pod_opportunities(pod)
@@ -1073,7 +1073,7 @@ class PodOperatingStore:
         duration = changes.get("duration_minutes", current_duration)
         values = {
             "stakeholder_id": stakeholder_id,
-            "business_unit": stakeholders[stakeholder_id].business_unit,
+            "business_unit": stakeholders[stakeholder_id].business_unit or "Pod Leadership",
         }
         field_map = {
             "subject": "title", "event_type": "event_type", "opportunity_id": "opportunity_id",
@@ -1155,7 +1155,7 @@ class PodOperatingStore:
                 source_meeting_id=meeting.id,
                 importance="High" if person.is_buyer else "Medium",
                 status=status_value,
-                business_unit=person.business_unit,
+                business_unit=person.business_unit or "Pod Leadership",
                 is_client=(payload.get("event_type") or "client") != "internal",
                 prep_required=bool(payload.get("prep_required", True)),
                 previous_engagement=meeting.summary,

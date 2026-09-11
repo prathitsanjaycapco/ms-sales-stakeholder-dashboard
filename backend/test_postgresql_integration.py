@@ -34,7 +34,7 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
                 "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()"
             )).scalars())
 
-            self.assertEqual("0012_executive_provenance", revision)
+        self.assertEqual("0017_pod_heads", revision)
         self.assertTrue({item[0] for item in POSTGRESQL_FOREIGN_KEYS}.issubset(constraints))
         self.assertTrue({item[0] for item in POSTGRESQL_INDEXES}.issubset(indexes))
 

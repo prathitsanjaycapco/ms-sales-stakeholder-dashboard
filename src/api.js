@@ -7,18 +7,27 @@ async function request(path, options = {}) {
     headers: { ...(options.body instanceof Blob ? {} : { "Content-Type": "application/json" }), ...headers },
   });
   if (!response.ok) {
-    let detail;
+    const body = await response.text();
+    let detail = body.trim();
     try {
-      const payload = await response.json();
+      const payload = JSON.parse(body);
       detail = Array.isArray(payload.detail)
         ? payload.detail.map((item) => item.msg).filter(Boolean).join("; ")
-        : payload.detail || payload.message;
-    } catch {
-      detail = await response.text();
-    }
-    throw new Error(detail || `Request failed with ${response.status}`);
+        : payload.detail || payload.message || detail;
+    } catch {}
+    const error = new Error(detail || `Request failed with ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   return response.status === 204 ? null : response.json();
+}
+
+async function archive(path) {
+  try { return await request(path, { method: "POST" }); }
+  catch (error) {
+    if (error.status === 404) throw new Error("The active API does not support recoverable deletion, or this record was already archived. Restart or redeploy the API, refresh this page, and try again.");
+    throw error;
+  }
 }
 
 function upload(path, file, metadata) {
@@ -67,14 +76,19 @@ export const api = {
   getResourcingOverview: (pod = "All") => request(`/resourcing/overview${pod && pod !== "All" ? `?pod=${encodeURIComponent(pod)}` : ""}`),
   getResourcingAnalytics: (pod = "All") => request(`/resourcing/analytics${pod && pod !== "All" ? `?pod=${encodeURIComponent(pod)}` : ""}`),
   getResourcingOptions: (pod = "All") => request(`/resourcing/options${pod && pod !== "All" ? `?pod=${encodeURIComponent(pod)}` : ""}`),
+  getResourcingTrash: (pod = "All") => request(`/resourcing/trash${pod && pod !== "All" ? `?pod=${encodeURIComponent(pod)}` : ""}`),
+  restoreResourcingItem: (type, id) => request(`/resourcing/trash/${encodeURIComponent(type)}/${encodeURIComponent(id)}/restore`, { method: "POST" }),
   getResourceRequirements: (pod = "All") => request(`/resource-requirements${pod && pod !== "All" ? `?pod=${encodeURIComponent(pod)}` : ""}`),
   getResourceRequirement: (id) => request(`/resource-requirements/${encodeURIComponent(id)}`),
   createResourceRequirement: (payload) => request("/resource-requirements", { method: "POST", body: JSON.stringify(payload) }),
   updateResourceRequirement: (id, payload) => request(`/resource-requirements/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteResourceRequirement: (id, reason = "") => archive(`/resource-requirements/${encodeURIComponent(id)}/archive?reason=${encodeURIComponent(reason)}`),
   getCandidates: (pod = "All", requirementId) => request(`/candidates?${new URLSearchParams({ ...(pod && pod !== "All" ? { pod } : {}), ...(requirementId ? { resource_requirement_id: requirementId } : {}) })}`),
   getCandidate: (id) => request(`/candidates/${encodeURIComponent(id)}`),
   createCandidate: (payload) => request("/candidates", { method: "POST", body: JSON.stringify(payload) }),
   updateCandidate: (id, payload) => request(`/candidates/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  transitionCandidate: (id, payload) => request(`/candidates/${encodeURIComponent(id)}/transition`, { method: "POST", body: JSON.stringify(payload) }),
+  deleteCandidate: (id, reason = "") => archive(`/candidates/${encodeURIComponent(id)}/archive?reason=${encodeURIComponent(reason)}`),
   createInterview: (candidateId, payload) => request(`/candidates/${encodeURIComponent(candidateId)}/interviews`, { method: "POST", body: JSON.stringify(payload) }),
   updateInterview: (id, payload) => request(`/interviews/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
   createOffer: (candidateId, payload) => request(`/candidates/${encodeURIComponent(candidateId)}/offer`, { method: "POST", body: JSON.stringify(payload) }),
@@ -83,6 +97,7 @@ export const api = {
   getOnboarding: (pod = "All") => request(`/onboarding${pod && pod !== "All" ? `?pod=${encodeURIComponent(pod)}` : ""}`),
   getOnboardingRecord: (id) => request(`/onboarding/${encodeURIComponent(id)}`),
   updateOnboarding: (id, payload) => request(`/onboarding/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteOnboarding: (id, reason = "") => archive(`/onboarding/${encodeURIComponent(id)}/archive?reason=${encodeURIComponent(reason)}`),
   updateOnboardingStep: (id, stepId, payload) => request(`/onboarding/${encodeURIComponent(id)}/steps/${encodeURIComponent(stepId)}`, { method: "PATCH", body: JSON.stringify(payload) }),
   startOnboardingCandidate: (id) => request(`/onboarding/${encodeURIComponent(id)}/start`, { method: "POST" }),
   getReconciliation: (anchor) => request(`/integrity/reconciliation${anchor ? `?anchor=${encodeURIComponent(anchor)}` : ""}`),
@@ -104,6 +119,7 @@ export const api = {
   getHistory: (id) => request(`/stakeholders/${id}/history`),
   updateReportingLine: (payload) => request("/organization/reporting-line", { method: "PATCH", body: JSON.stringify(payload) }),
   updatePrimaryTechnology: (businessUnitId, payload) => request(`/business-units/${businessUnitId}/primary-tech-stakeholder`, { method: "PATCH", body: JSON.stringify(payload) }),
+  updatePodHead: (pod, payload) => request(`/pods/${encodeURIComponent(pod)}/head`, { method: "PATCH", body: JSON.stringify(payload) }),
   getCoverage: (pod) => request(`/pods/${encodeURIComponent(pod)}/coverage`),
   getMeetings: (stakeholderId, upcoming) => request(`/stakeholders/${stakeholderId}/meetings${upcoming === undefined ? "" : `?upcoming=${upcoming}`}`),
   getPodMeetings: (pod) => request(`/meetings?pod=${encodeURIComponent(pod)}`),

@@ -29,6 +29,7 @@ from .models import (
     OpportunityCreate,
     OpportunityUpdate,
     PrimaryTechnologyUpdate,
+    PodHeadUpdate,
     ReportingLineUpdate,
     Stakeholder,
     StakeholderCreate,
@@ -48,6 +49,7 @@ from .models import (
     ResourceRequirementUpdate,
     CandidateCreate,
     CandidateUpdate,
+    CandidateTransition,
     CandidateInterviewCreate,
     CandidateInterviewUpdate,
     OfferCreate,
@@ -394,6 +396,7 @@ def pods():
         {
             "id": pod,
             "name": pod,
+            "head_stakeholder_id": repository.pod_heads.get(pod),
             "division_count": len(divisions),
             "business_unit_count": sum(len(units) for units in divisions.values()),
             "stakeholder_count": len(repository.list_stakeholders(pod=pod)),
@@ -586,6 +589,21 @@ def resourcing_options(pod: Optional[str] = None):
     return resourcing_store.options(pod)
 
 
+@app.get("/api/resourcing/trash")
+def resourcing_trash(pod: Optional[str] = None):
+    return resourcing_store.list_trash(pod)
+
+
+@app.post("/api/resourcing/trash/{item_type}/{item_id}/restore")
+def resourcing_trash_restore(item_type: str, item_id: str, request: Request):
+    if "Account Admin" not in request.state.principal.roles:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Restoring master data requires an Account Admin role")
+    try:
+        return resourcing_store.restore_trash_item(item_type, item_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
 @app.get("/api/resource-requirements")
 def resource_requirement_list(pod: Optional[str] = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=1000)):
     return resourcing_store.list_requirements(pod)[offset:offset + limit]
@@ -615,6 +633,22 @@ def resource_requirement_update(requirement_id: str, payload: ResourceRequiremen
         raise translate_domain_error(error) from error
 
 
+@app.delete("/api/resource-requirements/{requirement_id}")
+def resource_requirement_archive(requirement_id: str, request: Request, reason: str = Query(default="", max_length=2000)):
+    try:
+        return resourcing_store.archive_requirement(requirement_id, reason, request.state.principal.employee_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/resource-requirements/{requirement_id}/archive")
+def resource_requirement_archive_command(requirement_id: str, request: Request, reason: str = Query(default="", max_length=2000)):
+    try:
+        return resourcing_store.archive_requirement(requirement_id, reason, request.state.principal.employee_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
 @app.get("/api/candidates")
 def candidate_list(pod: Optional[str] = None, resource_requirement_id: Optional[str] = None, offset: int = Query(default=0, ge=0), limit: int = Query(default=200, ge=1, le=1000)):
     return resourcing_store.list_candidates(pod, resource_requirement_id)[offset:offset + limit]
@@ -640,6 +674,30 @@ def candidate_create(payload: CandidateCreate):
 def candidate_update(candidate_id: str, payload: CandidateUpdate, request: Request):
     try:
         return resourcing_store.update_candidate(candidate_id, payload.model_dump(exclude_unset=True), request.state.principal.employee_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/candidates/{candidate_id}/transition")
+def candidate_transition(candidate_id: str, payload: CandidateTransition, request: Request):
+    try:
+        return resourcing_store.transition_candidate(candidate_id, payload.model_dump(exclude_none=True), request.state.principal.employee_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.delete("/api/candidates/{candidate_id}")
+def candidate_archive(candidate_id: str, request: Request, reason: str = Query(default="", max_length=2000)):
+    try:
+        return resourcing_store.archive_candidate(candidate_id, reason, request.state.principal.employee_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/candidates/{candidate_id}/archive")
+def candidate_archive_command(candidate_id: str, request: Request, reason: str = Query(default="", max_length=2000)):
+    try:
+        return resourcing_store.archive_candidate(candidate_id, reason, request.state.principal.employee_id)
     except Exception as error:
         raise translate_domain_error(error) from error
 
@@ -713,6 +771,22 @@ def onboarding_detail(onboarding_id: str):
 def onboarding_update(onboarding_id: str, payload: OnboardingRecordUpdate):
     try:
         return resourcing_store.update_onboarding(onboarding_id, payload.model_dump(exclude_unset=True))
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.delete("/api/onboarding/{onboarding_id}")
+def onboarding_archive(onboarding_id: str, request: Request, reason: str = Query(default="", max_length=2000)):
+    try:
+        return resourcing_store.archive_onboarding(onboarding_id, reason, request.state.principal.employee_id)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.post("/api/onboarding/{onboarding_id}/archive")
+def onboarding_archive_command(onboarding_id: str, request: Request, reason: str = Query(default="", max_length=2000)):
+    try:
+        return resourcing_store.archive_onboarding(onboarding_id, reason, request.state.principal.employee_id)
     except Exception as error:
         raise translate_domain_error(error) from error
 
@@ -948,6 +1022,14 @@ def update_reporting_line(payload: ReportingLineUpdate):
 def update_primary_technology(business_unit_id: str, payload: PrimaryTechnologyUpdate):
     try:
         return repository.set_primary_technology(business_unit_id, payload.stakeholder_id, payload.reason)
+    except Exception as error:
+        raise translate_domain_error(error) from error
+
+
+@app.patch("/api/pods/{pod}/head")
+def update_pod_head(pod: str, payload: PodHeadUpdate):
+    try:
+        return repository.set_pod_head(pod, payload.stakeholder_id, payload.reason)
     except Exception as error:
         raise translate_domain_error(error) from error
 

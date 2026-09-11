@@ -1,0 +1,77 @@
+.res-role-workflow-steps { display: grid !important; gap: 6px !important; }
+.res-role-next-action { margin-top: 10px !important; padding-top: 10px; border-top: 1px solid #d7e2e7; display: grid !important; gap: 8px !important; }
+.res-role-next-action p { margin: 0; color: #4c6677; font-size: 8px; line-height: 1.45; }
+.res-role-next-action > div { display: flex; gap: 7px; flex-wrap: wrap; }
+.res-role-next-action button { min-height: 34px; padding: 0 11px; display: flex; align-items: center; justify-content: center; gap: 6px; color: #356176; border: 1px solid #b8cdd8; border-radius: 4px; background: #fff; font-size: 8px; font-weight: 800; }
+.res-role-next-action button.primary { color: #fff; border-color: #1679aa; background: #1679aa; }
+.res-role-next-action button:disabled { opacity: .55; }
+.res-inline-notice { margin: 0 0 9px; padding: 8px 10px; display: flex; align-items: center; gap: 7px; color: #246f55; border: 1px solid #afd3c4; border-radius: 4px; background: #eff9f5; }
+.res-inline-notice svg { width: 13px; }
+.res-save-interview { width: calc(100% - 22px); min-height: 34px; margin: 0 11px 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; color: #176b93; border: 1px solid #99c6d9; border-radius: 4px; background: #f3fbfe; font-size: 8px; font-weight: 800; }
+.res-save-interview:disabled { opacity: .5; }
+.res-overview-focused { display: grid; gap: 14px; }
+.res-critical-pulse { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.res-critical-pulse > button { min-height: 88px; padding: 16px; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; color: #406075; border: 1px solid #d3e0e7; border-radius: 6px; background: #fff; text-align: left; }
+.res-critical-pulse > button.attention { border-color: #e4c0bc; background: #fff9f8; }
+.res-critical-pulse svg { width: 19px; color: #167cad; }
+.res-critical-pulse .attention > svg { color: #bf504a; }
+.res-critical-pulse span { min-width: 0; display: grid; gap: 1px; }
+.res-critical-pulse small,.res-critical-pulse em { overflow: hidden; color: #728999; font-size: 8px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.res-critical-pulse strong { color: #143f59; font-size: 24px; line-height: 1; }
+.res-critical-pulse > button > svg:last-child { width: 13px; color: #9aafbc; }
+.res-overview-mini-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.res-overview-mini header,.res-overview-onboarding header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.res-overview-mini header > button,.res-overview-onboarding header > button { display: inline-flex; align-items: center; gap: 3px; color: #1477a5; font-size: 8px; font-weight: 800; white-space: nowrap; }
+.res-overview-mini header button svg,.res-overview-onboarding header button svg { width: 13px; }
+.overview-mini-summary { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 0 8px; margin: 14px 16px; }
+.overview-mini-summary strong { color: #133f59; font-size: 27px; }
+.overview-mini-summary > span { color: #4e7186; font-size: 10px; font-weight: 750; }
+.overview-mini-summary small { grid-column: 1 / -1; color: #718897; font-size: 8px; }
+.overview-mini-summary.compact { margin: 14px 16px 16px; }
+.overview-mini-summary.compact strong { font-size: 20px; }
+.overview-role-list { display: grid; margin: 0 16px 16px; border-top: 1px solid #e1ebef; }
+.overview-role-list > button { min-height: 39px; padding: 9px 2px; display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #36566b; border-bottom: 1px solid #e7eef2; text-align: left; }
+.overview-role-list span { min-width: 0; display: grid; gap: 1px; }
+.overview-role-list b,.overview-role-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.overview-role-list b { font-size: 9px; }.overview-role-list small { color: #708796; font-size: 8px; }
+.overview-candidate-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 14px 16px 0; }
+.overview-candidate-stages button { min-height: 59px; padding: 7px 4px; display: grid; align-content: center; gap: 3px; color: #547184; border: 1px solid #d8e5eb; border-radius: 4px; background: #f9fcfd; text-align: center; }
+.overview-candidate-stages strong { color: #123f59; font-size: 21px; }.overview-candidate-stages span { font-size: 7px; font-weight: 800; line-height: 1.2; }
+.res-overview-onboarding { min-width: 0; }.overview-onboarding-scroll { overflow-x: auto; }
+.res-overview-onboarding table { width: 100%; min-width: 780px; border-collapse: collapse; }
+.res-overview-onboarding th { padding: 8px 7px; color: #698193; border-bottom: 1px solid #dce7ec; font-size: 7px; text-align: left; text-transform: uppercase; }
+.res-overview-onboarding td { max-width: 170px; padding: 9px 7px; color: #3f6075; border-bottom: 1px solid #e6eef2; font-size: 8px; vertical-align: middle; }
+.res-overview-onboarding tbody tr { cursor: pointer; }.res-overview-onboarding tbody tr:hover { background: #f5fafc; }
+.resourcing-view .res-kanban > article > header { min-height: 44px; height: auto; padding: 0 12px; font-size: 12px; line-height: 1.25; }
+.resourcing-view .res-kanban > article > header b { min-width: 24px; padding: 4px 7px; font-size: 12px; line-height: 1; }
+.resourcing-view .res-kanban > article > div { padding: 9px; gap: 9px; }
+.resourcing-view .res-kanban > article > div > button { min-height: 158px; padding: 12px; gap: 9px; }
+.resourcing-view .res-kanban .res-avatar { width: 34px; height: 34px; font-size: 11px; }
+.resourcing-view .res-kanban p { gap: 3px; }
+.resourcing-view .res-kanban p strong { font-size: 13px; line-height: 1.25; }
+.resourcing-view .res-kanban small { font-size: 12px !important; line-height: 1.35; }
+.resourcing-view .res-match { min-height: 28px; padding: 6px 9px; display: inline-flex; align-items: baseline; gap: 4px; color: #3e6e87; border: 1px solid #c6dce7; border-radius: 14px; background: #edf5f9; font-size: 12px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+.resourcing-view .res-match b { color: #126f9b; font-size: 14px; font-weight: 800; line-height: 1; }
+.resourcing-view .res-kanban footer { padding-top: 8px; font-size: 12px; line-height: 1.35; }
+.resourcing-view .res-kanban footer svg { width: 14px; }
+.resourcing-view .res-kanban > article > p { font-size: 12px; }
+.res-overview-onboarding td b,.res-overview-onboarding td small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.res-overview-onboarding td b { color: #234b64; font-size: 9px; }.res-overview-onboarding td small { color: #788f9d; font-size: 8px; }
+.res-overview-onboarding td .res-progress { display: block; min-width: 74px; margin-top: 4px; }.overview-step-icons { white-space: nowrap; }.overview-step-icons > span { display: inline-flex; margin-right: 2px; }.overview-step-icons .step-icon { transform: scale(.72); transform-origin: center; }
+.res-onboarding-next { margin: 10px 0; padding: 11px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 3px 10px; border: 1px solid #b9d8e5; border-radius: 5px; background: #f1f9fc; }
+.res-onboarding-next > span { grid-column: 1; color: #1c7ca8; font-size: 7px; font-weight: 850; }
+.res-onboarding-next > strong { grid-column: 1; color: #244b61; font-size: 10px; }
+.res-onboarding-next > small { grid-column: 1; color: #687f8e; }
+.res-onboarding-next > button { grid-column: 2; grid-row: 1 / 4; min-height: 34px; padding: 0 11px; display: flex; align-items: center; gap: 6px; color: #fff; border-radius: 4px; background: #187ca9; font-size: 8px; font-weight: 800; }
+.res-onboarding-next > button svg { width: 13px; }
+.res-onboarding-next.blocked { border-color: #e2bcb8; background: #fff5f4; }
+.res-onboarding-next.blocked > button { background: #9a5049; }
+
+@media (max-width: 520px) {
+  .res-role-next-action > div, .res-role-next-action button { width: 100%; }
+  .res-onboarding-next { grid-template-columns: 1fr; }
+  .res-onboarding-next > button { grid-column: 1; grid-row: auto; margin-top: 7px; justify-content: center; }
+  .res-critical-pulse { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+  .res-critical-pulse > button { min-height: 76px; padding: 12px; gap: 6px; }.res-critical-pulse strong { font-size: 20px; }
+  .res-overview-mini-grid { grid-template-columns: 1fr; gap: 10px; }.overview-candidate-stages { gap: 4px; }
+  .res-overview-onboarding { margin-left: -2px; margin-right: -2px; }.res-overview-onboarding table { min-width: 670px; }
+}

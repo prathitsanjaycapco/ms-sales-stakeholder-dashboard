@@ -11,7 +11,7 @@ OpportunityStage = Literal["Discovery", "Qualification", "Proposal", "Negotiatio
 RequirementPriority = Literal["CRITICAL", "HIGH", "MEDIUM", "LOW"]
 RequirementStatus = Literal["DRAFT", "OPEN", "SOURCING", "PARTIALLY_FILLED", "ON_HOLD", "FILLED", "CANCELLED"]
 CandidateType = Literal["EXTERNAL", "INTERNAL_CAPCO"]
-CandidateStage = Literal["IDENTIFIED", "CAPCO_REVIEW", "SUBMITTED_TO_MS", "MS_REVIEW", "INTERVIEW_SCHEDULED", "INTERVIEWING", "OFFER", "SELECTED", "REJECTED", "WITHDRAWN"]
+CandidateStage = Literal["RESUME_REVIEW", "CAPCO_INTERVIEW", "MS_INTERVIEW", "OFFER", "ONBOARDING", "REJECTED", "WITHDRAWN"]
 InterviewStatus = Literal["SCHEDULED", "COMPLETED", "CANCELLED"]
 OfferStatus = Literal["OFFER_PENDING", "RATE_NEGOTIATION", "OFFER_ACCEPTED", "OFFER_DECLINED"]
 OnboardingStatus = Literal["NOT_STARTED", "IN_PROGRESS", "BLOCKED", "READY_TO_START", "COMPLETE"]
@@ -49,8 +49,8 @@ class Stakeholder(BaseModel):
     name: str
     title: str
     pod: str
-    division: str
-    business_unit: str
+    division: Optional[str] = None
+    business_unit: Optional[str] = None
     team_type: TeamType
     organizational_role: str
     level: str = "Vice President"
@@ -131,6 +131,11 @@ class ReportingLineUpdate(BaseModel):
 class PrimaryTechnologyUpdate(BaseModel):
     stakeholder_id: str
     reason: str = Field(default="Primary technology ownership update", max_length=240)
+
+
+class PodHeadUpdate(BaseModel):
+    stakeholder_id: str
+    reason: str = Field(default="Pod leadership update", max_length=240)
 
 
 class Meeting(BaseModel):
@@ -409,6 +414,7 @@ class ReportingLine(BaseModel):
 class MapResponse(BaseModel):
     pod: str
     generated_at: datetime
+    pod_head_stakeholder_id: Optional[str] = None
     divisions: list[dict]
     stakeholders: list[Stakeholder]
     reporting_lines: list[ReportingLine]
@@ -465,6 +471,7 @@ class ResourceRequirementCreate(BaseModel):
     description: str = ""
     requested_headcount: int = Field(ge=1, le=100)
     level: str
+    country_code: str = Field(min_length=2, max_length=2)
     location: str
     required_skills: list[str] = Field(default_factory=list)
     preferred_skills: list[str] = Field(default_factory=list)
@@ -473,6 +480,7 @@ class ResourceRequirementCreate(BaseModel):
     status: RequirementStatus = "OPEN"
     request_owner_capco_employee_id: str
     client_stakeholder_id: str
+    resourcing_app_created: Literal[True]
 
 
 class ResourceRequirementUpdate(BaseModel):
@@ -482,6 +490,7 @@ class ResourceRequirementUpdate(BaseModel):
     description: Optional[str] = None
     requested_headcount: Optional[int] = Field(default=None, ge=1, le=100)
     level: Optional[str] = None
+    country_code: Optional[str] = Field(default=None, min_length=2, max_length=2)
     location: Optional[str] = None
     required_skills: Optional[list[str]] = None
     preferred_skills: Optional[list[str]] = None
@@ -490,6 +499,9 @@ class ResourceRequirementUpdate(BaseModel):
     status: Optional[RequirementStatus] = None
     request_owner_capco_employee_id: Optional[str] = None
     client_stakeholder_id: Optional[str] = None
+    bench_checked: Optional[bool] = None
+    bench_outcome: Optional[Literal["CANDIDATE_AVAILABLE", "NO_CANDIDATE", "EXISTING_PIPELINE"]] = None
+    resourcing_request_submitted: Optional[bool] = None
 
 
 class CandidateCreate(BaseModel):
@@ -502,7 +514,7 @@ class CandidateCreate(BaseModel):
     level: str
     location: str
     skills: list[str] = Field(default_factory=list)
-    stage: CandidateStage = "IDENTIFIED"
+    stage: CandidateStage = "RESUME_REVIEW"
     capco_reviewer_id: str
     ms_reviewer_stakeholder_id: Optional[str] = None
     expected_start_date: Optional[date] = None
@@ -511,11 +523,33 @@ class CandidateCreate(BaseModel):
 
 class CandidateUpdate(BaseModel):
     expected_updated_at: Optional[datetime] = None
+    first_name: Optional[str] = Field(default=None, min_length=1, max_length=90)
+    last_name: Optional[str] = Field(default=None, min_length=1, max_length=90)
+    email: Optional[str] = None
+    candidate_type: Optional[CandidateType] = None
+    level: Optional[str] = None
+    skills: Optional[list[str]] = None
+    match_score: Optional[int] = Field(default=None, ge=0, le=100)
     stage: Optional[CandidateStage] = None
     expected_start_date: Optional[date] = None
     capco_reviewer_id: Optional[str] = None
     ms_reviewer_stakeholder_id: Optional[str] = None
     note: Optional[str] = None
+
+
+class CandidateTransition(BaseModel):
+    action: Literal["ADVANCE", "REJECT", "WITHDRAW", "CORRECT"]
+    target_stage: Optional[CandidateStage] = None
+    reason: str = Field(default="", max_length=2000)
+    expected_updated_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def validate_transition(self):
+        if self.action == "CORRECT" and (not self.target_stage or not self.reason.strip()):
+            raise ValueError("Stage corrections require a target stage and reason")
+        if self.action in {"REJECT", "WITHDRAW"} and not self.reason.strip():
+            raise ValueError(f"{self.action.title()} requires a reason")
+        return self
 
 
 class CandidateInterviewCreate(BaseModel):

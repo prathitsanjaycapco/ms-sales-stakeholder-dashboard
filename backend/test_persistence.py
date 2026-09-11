@@ -42,9 +42,13 @@ class PersistentStakeholderRepositoryTests(unittest.TestCase):
 
     def test_reporting_change_closes_previous_assignment_version(self):
         repository = PersistentStakeholderRepository("sqlite+pysqlite:///:memory:", seed_demo_data=True, auto_create_schema=True)
-        person = next(item for item in repository.list_stakeholders(pod="ISG") if item.manager_id)
+        person = next(item for item in repository.list_stakeholders(pod="ISG") if item.organizational_role == "Business Stakeholder")
+        replacement_manager = next(
+            item for item in repository.list_stakeholders(pod="ISG")
+            if item.id != person.id and item.organizational_role == "Business Stakeholder"
+        )
         previous_assignment_id = person.assignment_id
-        repository.update_reporting_line(person.id, None, "History verification")
+        repository.update_reporting_line(person.id, replacement_manager.id, "History verification")
         with repository.engine.connect() as connection:
             rows = connection.execute(
                 select(stakeholder_assignments).where(stakeholder_assignments.c.stakeholder_id == person.id)
@@ -55,6 +59,22 @@ class PersistentStakeholderRepositoryTests(unittest.TestCase):
         self.assertFalse(prior["is_current"])
         self.assertIsNotNone(prior["effective_to"])
         self.assertTrue(current["id"].startswith("assignment-version-"))
+        repository.engine.dispose()
+
+    def test_cross_unit_reporting_change_is_durable(self):
+        repository = PersistentStakeholderRepository("sqlite+pysqlite:///:memory:", seed_demo_data=True, auto_create_schema=True)
+        division_head = next(item for item in repository.list_stakeholders(pod="ISG") if item.organizational_role == "Division Head")
+        report = next(item for item in repository.list_stakeholders(pod="ISG") if item.organizational_role == "Business Unit Head" and item.business_unit != division_head.business_unit)
+        repository.update_reporting_line(report.id, division_head.id, "Canonical division structure")
+        self.assertEqual(division_head.id, repository.get_stakeholder(report.id).manager_id)
+        with repository.engine.connect() as connection:
+            current = connection.execute(
+                select(stakeholder_assignments.c.manager_stakeholder_id).where(
+                    stakeholder_assignments.c.stakeholder_id == report.id,
+                    stakeholder_assignments.c.is_current,
+                )
+            ).scalar_one()
+        self.assertEqual(division_head.id, current)
         repository.engine.dispose()
 
     def test_meeting_projection_failure_rolls_back_canonical_record(self):

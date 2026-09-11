@@ -41,6 +41,7 @@ POSTGRESQL_FOREIGN_KEYS = (
     ("fk_demand_engagement", "resource_demand", "executive_engagements", ("engagement_id",), ("id",)),
     ("fk_demand_opportunity", "resource_demand", "opportunities", ("opportunity_id",), ("id",)),
     ("fk_division_head", "divisions", "stakeholders", ("head_stakeholder_id",), ("id",)),
+    ("fk_pod_head", "pods", "stakeholders", ("head_stakeholder_id",), ("id",)),
     ("fk_focus_pod", "pod_focus", "pods", ("pod_id",), ("id",)),
     ("fk_health_pod", "pod_health_metrics", "pods", ("pod_id",), ("id",)),
     ("fk_change_pod", "pod_change_events", "pods", ("pod_id",), ("id",)),

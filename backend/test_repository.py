@@ -13,8 +13,52 @@ class StakeholderRepositoryTests(unittest.TestCase):
         self.assertGreater(len(records), 100)
         self.assertGreater(len({record.location for record in records}), 5)
         self.assertEqual({record.relationship_strength for record in records}, {"Strong", "Medium", "Developing", "Unknown"})
-        self.assertTrue(any(record.manager_id is None and record.organizational_role == "Business Stakeholder" for record in records))
+        managerless = [record for record in records if record.manager_id is None]
+        self.assertEqual(1, len(managerless))
+        self.assertEqual("Pod Head", managerless[0].organizational_role)
+        self.assertEqual(self.repository.pod_heads["ISG"], managerless[0].id)
         self.assertTrue(any(record.is_primary_technology for record in records))
+
+    def test_seeded_hierarchy_uses_canonical_heads(self):
+        for pod, expected_name in {
+            "ISG": "Dan Simkowitz",
+            "Wealth Management": "Jed Finn",
+            "MSIM": "Ben Huneke",
+        }.items():
+            people = self.repository.list_stakeholders(pod=pod)
+            pod_head = self.repository.get_stakeholder(self.repository.pod_heads[pod])
+            self.assertEqual(expected_name, pod_head.name)
+            self.assertIsNone(pod_head.manager_id)
+            self.assertTrue(all(
+                item.manager_id == pod_head.id
+                for item in people
+                if item.organizational_role == "Division Head"
+            ))
+            self.assertTrue(all(
+                item.manager_id is not None
+                for item in people
+                if item.organizational_role != "Pod Head"
+            ))
+
+    def test_pod_head_change_reparents_division_heads(self):
+        current = self.repository.get_stakeholder(self.repository.pod_heads["ISG"])
+        replacement = next(
+            item for item in self.repository.list_stakeholders(pod="ISG")
+            if item.organizational_role == "Business Stakeholder"
+            and not any(report.manager_id == item.id for report in self.repository.stakeholders.values())
+        )
+        result = self.repository.set_pod_head("ISG", replacement.id, "Leadership transition")
+        self.assertEqual(replacement.id, result["head_stakeholder_id"])
+        self.assertTrue(all(
+            item.manager_id == replacement.id
+            for item in self.repository.list_stakeholders(pod="ISG")
+            if item.organizational_role == "Division Head"
+        ))
+        self.assertIsNotNone(current.manager_id)
+        self.assertEqual(
+            [replacement.id],
+            [item.id for item in self.repository.list_stakeholders(pod="ISG") if item.manager_id is None],
+        )
 
     def test_map_uses_independent_business_units_and_filters(self):
         map_data = self.repository.build_map("ISG")
@@ -22,6 +66,11 @@ class StakeholderRepositoryTests(unittest.TestCase):
         buyer_map = self.repository.build_map("ISG", division="Front Office", role="Buyer")
         self.assertTrue(buyer_map.stakeholders)
         self.assertTrue(all(item.division == "Front Office" and item.is_buyer for item in buyer_map.stakeholders))
+
+        filter_options = self.repository.filter_options("ISG")
+        self.assertNotIn(None, filter_options["business_units"])
+        self.assertNotIn("Division Leadership", filter_options["business_units"])
+        self.assertTrue(filter_options["business_units"])
 
     def test_seeded_and_created_stakeholders_are_editable(self):
         unit = next(iter(self.repository.units.values()))
@@ -40,6 +89,36 @@ class StakeholderRepositoryTests(unittest.TestCase):
         branch = next(item for item in self.repository.stakeholders.values() if item.manager_id == lead.id)
         with self.assertRaises(ConflictError):
             self.repository.update_reporting_line(lead.id, branch.id, "Invalid cycle")
+
+    def test_reporting_lines_allow_cross_unit_managers_within_a_pod(self):
+        division_head = next(item for item in self.repository.list_stakeholders(pod="ISG") if item.organizational_role == "Division Head")
+        report = next(item for item in self.repository.list_stakeholders(pod="ISG") if item.organizational_role == "Business Unit Head" and item.business_unit != division_head.business_unit)
+        result = self.repository.update_reporting_line(report.id, division_head.id, "Align unit reporting to division head")
+        self.assertEqual(division_head.id, result["manager_id"])
+        self.assertEqual(division_head.id, self.repository.get_stakeholder(report.id).manager_id)
+
+    def test_stakeholder_creation_allows_a_same_pod_cross_unit_manager(self):
+        manager = next(item for item in self.repository.list_stakeholders(pod="ISG") if item.organizational_role == "Division Head")
+        created = self.repository.create_stakeholder(StakeholderCreate(
+            name="Cross Unit Report", title="Director, Strategy", pod="ISG", division="Front Office",
+            business_unit="Equities", manager_id=manager.id,
+        ))
+        self.assertEqual(manager.id, created.manager_id)
+
+    def test_reporting_lines_reject_cross_pod_managers(self):
+        report = next(item for item in self.repository.list_stakeholders(pod="ISG") if item.organizational_role == "Business Unit Head")
+        manager = next(item for item in self.repository.list_stakeholders(pod="MSIM") if item.organizational_role == "Division Head")
+        with self.assertRaises(ConflictError):
+            self.repository.update_reporting_line(report.id, manager.id, "Invalid cross-pod reporting")
+
+    def test_reporting_lines_reject_missing_managers_and_invalid_head_links(self):
+        business = next(item for item in self.repository.list_stakeholders(pod="ISG") if item.organizational_role == "Business Stakeholder")
+        division_head = next(item for item in self.repository.list_stakeholders(pod="ISG") if item.organizational_role == "Division Head")
+        wrong_manager = next(item for item in self.repository.list_stakeholders(pod="ISG") if item.organizational_role == "Business Stakeholder")
+        with self.assertRaises(ConflictError):
+            self.repository.update_reporting_line(business.id, None, "Invalid orphan")
+        with self.assertRaises(ConflictError):
+            self.repository.update_reporting_line(division_head.id, wrong_manager.id, "Invalid division head")
 
     def test_notes_opportunities_and_primary_technology_history(self):
         unit = next(iter(self.repository.units.values()))

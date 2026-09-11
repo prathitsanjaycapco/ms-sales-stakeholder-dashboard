@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+const desktopReadability = readFileSync(new URL("./desktopReadability.css", import.meta.url), "utf8");
 const entry = readFileSync(new URL("./main.jsx", import.meta.url), "utf8");
 
 describe("shared dashboard visual system", () => {
@@ -33,6 +34,15 @@ describe("shared dashboard visual system", () => {
     expect(css).toContain("--ui-font-sm: 11px");
     expect(css).toContain("--ui-control: 36px");
     expect(css).toContain(".pod-card :is(small,em,p),.weekly-card :is(small,em,p,dt)");
+  });
+
+  it("adds a balanced wide-desktop type scale after the corrective layers", () => {
+    expect(entry.indexOf('import "./desktopReadability.css"')).toBeGreaterThan(entry.indexOf('import "./visualFixes.css"'));
+    expect(desktopReadability).toContain("@media (min-width: 1600px)");
+    expect(desktopReadability).toContain("--ui-font-xs: 12px");
+    expect(desktopReadability).toContain("--ui-font-sm: 13px");
+    expect(desktopReadability).toContain("--ui-content: 2048px");
+    expect(desktopReadability).not.toMatch(/font-size:\s*[5-9](?:\.\d+)?px/);
   });
 
   it("normalizes drawers, dialogs, and the account assistant", () => {

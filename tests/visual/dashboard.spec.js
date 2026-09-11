@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { responseFor } from "./fixtures.js";
+import { mapResponse, responseFor } from "./fixtures.js";
 
 const routes = [
   ["executive", "Account Executive View"],
@@ -44,10 +44,42 @@ for (const [section, heading] of routes) {
       await expect(page.locator(".data-guidance")).toHaveCount(0);
     }
     if (section === "resourcing") {
-      await expect(page.getByText("Available after a role is filled")).toBeVisible();
-      await expect(page.getByText("Available after a completed start")).toBeVisible();
+      await expect(page.getByText("Critical roles")).toBeVisible();
+      await expect(page.getByText("Readiness matrix")).toBeVisible();
     }
     await expect(page).toHaveScreenshot(`${section}-desktop.png`, { fullPage: false });
+  });
+}
+
+for (const [section, heading] of routes) {
+  test(`${heading} wide desktop readability`, async ({ page }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    await page.goto(`/?section=${section}&pod=${podForSection(section)}`, { waitUntil: "networkidle" });
+    await expect(page.getByRole("heading", { name: heading, exact: true }).first()).toBeVisible();
+    await expectNoPageOverflow(page);
+
+    const undersizedText = await page.locator("body *").evaluateAll((elements) => elements.flatMap((element) => {
+      const style = getComputedStyle(element);
+      const hasDirectText = [...element.childNodes].some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim());
+      if (!hasDirectText || style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return [];
+      const box = element.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) return [];
+      const size = Number.parseFloat(style.fontSize);
+      let renderedScale = 1;
+      for (let node = element; node instanceof Element; node = node.parentElement) {
+        const transform = getComputedStyle(node).transform;
+        if (transform !== "none") {
+          const matrix = new DOMMatrixReadOnly(transform);
+          renderedScale *= Math.hypot(matrix.a, matrix.b);
+        }
+      }
+      const renderedSize = size * renderedScale;
+      const minimumSize = 12;
+      return renderedSize < minimumSize ? [{ element: element.tagName.toLowerCase(), className: element.className, size, renderedSize, minimumSize, text: element.textContent.trim().slice(0, 80) }] : [];
+    }));
+
+    expect(undersizedText, JSON.stringify(undersizedText, null, 2)).toEqual([]);
+    await expect(page).toHaveScreenshot(`${section}-wide-desktop.png`, { fullPage: false });
   });
 }
 
@@ -71,6 +103,68 @@ test("phone map keeps controls within the viewport", async ({ page }) => {
   expect(overflowing).toEqual([]);
   await expectNoPageOverflow(page);
   await expect(page).toHaveScreenshot("stakeholders-phone.png", { fullPage: false });
+});
+
+test("stakeholder map renders the full business hierarchy and only primary technology managers", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/?section=stakeholders&pod=ISG", { waitUntil: "networkidle" });
+  await expect(page.locator('[data-stakeholder-id="s0"]')).toBeVisible();
+  await expect(page.locator(".map-completeness")).toHaveCount(0);
+  await expect(page.locator('[data-stakeholder-id="s6"]')).toHaveCount(0);
+  await expect(page.locator("[data-stakeholder-id]")).toHaveCount(mapResponse.stakeholders.length - 1);
+  await expect(page.locator(".canvas-toolbar span")).toHaveText("100%");
+  await page.getByRole("button", { name: "Zoom out" }).click();
+  await expect(page.locator(".canvas-toolbar span")).toHaveText("89%");
+  await expect(page).toHaveScreenshot("stakeholders-zoomed-out-desktop.png", { fullPage: false });
+});
+
+test("pod-head Team drawer and account assistant remain usable", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/?section=stakeholders&pod=ISG", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Open Dan Simkowitz" }).click();
+  await page.getByRole("button", { name: "Team", exact: true }).click();
+  await expect(page.getByText("Top of pod hierarchy")).toBeVisible();
+  await expect(page.locator(".team-tab .report-list")).toBeVisible();
+  await page.getByRole("button", { name: "Collapse stakeholder drawer" }).click();
+
+  const launcher = page.getByRole("button", { name: "Ask the Morgan Stanley account assistant" });
+  await launcher.click();
+  await expect(page.getByRole("dialog", { name: "Morgan Stanley account assistant" })).toBeVisible();
+  await expect(launcher).toBeVisible();
+});
+
+test("stakeholder map keeps nodes clamped, unique, legible, and connector-aligned", async ({ page }) => {
+  await page.setViewportSize({ width: 2560, height: 1440 });
+  await page.goto("/?section=stakeholders&pod=ISG", { waitUntil: "networkidle" });
+  const audit = await page.evaluate(() => {
+    const nodes = [...document.querySelectorAll("[data-stakeholder-id]")];
+    const ids = nodes.map((node) => node.dataset.stakeholderId);
+    const textOverflow = nodes.flatMap((node) => [...node.querySelectorAll(".node-copy strong,.node-copy small")]
+      .filter((text) => {
+        const textBox = text.getBoundingClientRect();
+        const nodeBox = node.getBoundingClientRect();
+        return textBox.left < nodeBox.left - 1 || textBox.right > nodeBox.right + 1;
+      }).map((text) => text.textContent));
+    const fontSizes = nodes.flatMap((node) => [...node.querySelectorAll(".node-copy strong,.node-copy small")]
+      .filter((text) => getComputedStyle(text).display !== "none")
+      .map((text) => Number.parseFloat(getComputedStyle(text).fontSize)));
+    const clamps = nodes.flatMap((node) => [...node.querySelectorAll(".node-copy strong,.node-copy small")]
+      .filter((text) => getComputedStyle(text).display !== "none")
+      .map((text) => getComputedStyle(text).webkitLineClamp));
+    const connectors = [...document.querySelectorAll("[data-division-connector]")];
+    const lanes = [...document.querySelectorAll(".division-lane")];
+    const alignment = connectors.map((connector, index) => {
+      const connectorBox = connector.getBoundingClientRect();
+      const laneBox = lanes[index].getBoundingClientRect();
+      return Math.abs(connectorBox.left - (laneBox.left + laneBox.width / 2));
+    });
+    return { ids, textOverflow, fontSizes, clamps, alignment };
+  });
+  expect(new Set(audit.ids).size).toBe(audit.ids.length);
+  expect(audit.textOverflow).toEqual([]);
+  expect(Math.min(...audit.fontSizes)).toBeGreaterThanOrEqual(12);
+  expect(audit.clamps.every((value) => value === "2")).toBe(true);
+  expect(audit.alignment.every((delta) => delta <= 1)).toBe(true);
 });
 
 for (const [section, heading] of phoneRoutes) {
@@ -106,6 +200,46 @@ test("phone open roles keeps every role metric visible", async ({ page }) => {
   await expect(page).toHaveScreenshot("resourcing-open-roles-phone.png", { fullPage: false });
 });
 
+test("candidate scores are prominent and overview cards keep content inset", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/?section=resourcing&pod=All&resourcingTab=Candidates", { waitUntil: "networkidle" });
+  const match = page.locator(".res-match").first();
+  await expect(match).toBeVisible();
+  const matchMetrics = await match.evaluate((node) => ({
+    badgeHeight: node.getBoundingClientRect().height,
+    labelFontSize: Number.parseFloat(getComputedStyle(node).fontSize),
+    scoreFontSize: Number.parseFloat(getComputedStyle(node.querySelector("b")).fontSize),
+  }));
+  expect(matchMetrics.badgeHeight).toBeGreaterThanOrEqual(28);
+  expect(matchMetrics.badgeHeight).toBeLessThanOrEqual(30);
+  expect(matchMetrics.labelFontSize).toBeGreaterThanOrEqual(12);
+  expect(matchMetrics.scoreFontSize).toBeGreaterThanOrEqual(14);
+  expect(matchMetrics.scoreFontSize).toBeLessThanOrEqual(15);
+  const stageTypography = await page.locator(".res-kanban").evaluate((kanban) => ({
+    header: Number.parseFloat(getComputedStyle(kanban.querySelector("article > header")).fontSize),
+    count: Number.parseFloat(getComputedStyle(kanban.querySelector("article > header b")).fontSize),
+    name: Number.parseFloat(getComputedStyle(kanban.querySelector("article button p strong")).fontSize),
+    detail: Number.parseFloat(getComputedStyle(kanban.querySelector("article button small")).fontSize),
+    footer: Number.parseFloat(getComputedStyle(kanban.querySelector("article button footer")).fontSize),
+  }));
+  expect(stageTypography).toEqual({ header: 12, count: 12, name: 13, detail: 12, footer: 12 });
+  await expect(page).toHaveScreenshot("resourcing-candidates-desktop.png", { fullPage: false });
+
+  await page.goto("/?section=resourcing&pod=All&resourcingTab=Overview", { waitUntil: "networkidle" });
+  const cardInsets = await page.locator(".res-overview-mini").evaluateAll((cards) => cards.flatMap((card) => {
+    const frame = card.getBoundingClientRect();
+    return [...card.querySelectorAll(":scope > .overview-mini-summary, :scope > .overview-role-list, :scope > .overview-candidate-stages")].map((content) => {
+      const box = content.getBoundingClientRect();
+      return { left: box.left - frame.left, right: frame.right - box.right };
+    });
+  }));
+  expect(cardInsets.length).toBeGreaterThanOrEqual(4);
+  for (const inset of cardInsets) {
+    expect(inset.left).toBeGreaterThanOrEqual(14);
+    expect(inset.right).toBeGreaterThanOrEqual(14);
+  }
+});
+
 test("phone resource requirement modal stays above persistent UI", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/?section=resourcing&pod=All&resourcingTab=Open%20Roles", { waitUntil: "networkidle" });
@@ -117,6 +251,65 @@ test("phone resource requirement modal stays above persistent UI", async ({ page
   await expect(page.locator(".assistant-launcher")).not.toBeVisible();
   await expectNoPageOverflow(page);
   await expect(page).toHaveScreenshot("resourcing-role-modal-phone.png", { fullPage: false });
+});
+
+test("onboarding uses a readable scrollable matrix and responsive records", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?section=resourcing&pod=All&resourcingTab=Onboarding", { waitUntil: "networkidle" });
+  await expect(page.locator(".res-onboarding-table")).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "Resource / role" })).toBeVisible();
+  const matrix = await page.locator(".res-onboarding-table").evaluate((node) => ({
+    overflow: node.scrollWidth - node.clientWidth,
+    narrowestHeader: Math.min(...[...node.querySelectorAll("th")].map((header) => header.getBoundingClientRect().width)),
+  }));
+  expect(matrix.overflow).toBeGreaterThan(100);
+  expect(matrix.narrowestHeader).toBeGreaterThanOrEqual(85);
+  const stickyColumns = await page.locator(".res-onboarding-table").evaluate((node) => {
+    node.scrollLeft = 300;
+    const frame = node.getBoundingClientRect();
+    const first = node.querySelector("tbody td:first-child").getBoundingClientRect();
+    const second = node.querySelector("tbody td:nth-child(2)").getBoundingClientRect();
+    return { frameLeft: frame.left, firstLeft: first.left, firstRight: first.right, secondLeft: second.left };
+  });
+  expect(Math.abs(stickyColumns.firstLeft - stickyColumns.frameLeft)).toBeLessThanOrEqual(2);
+  expect(Math.abs(stickyColumns.secondLeft - stickyColumns.firstRight)).toBeLessThanOrEqual(2);
+  await page.locator(".res-onboarding-table").evaluate((node) => { node.scrollLeft = 0; });
+  await expectNoPageOverflow(page);
+  await expect(page).toHaveScreenshot("resourcing-onboarding-desktop.png", { fullPage: false });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator(".res-onboarding-table")).not.toBeVisible();
+  await expect(page.locator(".res-onboarding-compact details")).toBeVisible();
+  await expectNoPageOverflow(page);
+  await expect(page).toHaveScreenshot("resourcing-onboarding-phone.png", { fullPage: false });
+});
+
+test("resourcing record workflows keep the next action in context", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?section=resourcing&pod=ISG&resourcingTab=Open%20Roles", { waitUntil: "networkidle" });
+  await page.locator(".res-role-card").first().click();
+  await expect(page.getByRole("button", { name: "Add candidate for this role" })).toBeVisible();
+  await expect(page).toHaveScreenshot("resourcing-role-workflow-desktop.png", { fullPage: false });
+  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "Candidates", exact: true }).click();
+  await page.locator(".res-kanban article button").first().click();
+  await expect(page.getByRole("button", { name: "Advance to Capco Interview" })).toBeVisible();
+  await expect(page).toHaveScreenshot("resourcing-candidate-workflow-desktop.png", { fullPage: false });
+  await page.getByRole("button", { name: "Edit candidate" }).click();
+  await expect(page.getByRole("dialog", { name: "Edit candidate" })).toBeVisible();
+  await expect(page.getByLabel("Match score")).toHaveValue("92");
+  await expect(page.getByLabel("Skills")).toHaveValue("Python");
+  await expect(page).toHaveScreenshot("resourcing-candidate-edit-desktop.png", { fullPage: false });
+});
+
+test("master data keeps active and archived records in a separate register", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?section=data&pod=ISG", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Master data" }).click();
+  await expect(page.getByRole("heading", { name: "Account master data" })).toBeVisible();
+  await expect(page.getByText("Legacy Cloud Engineer")).toBeVisible();
+  await expect(page.getByText("Active role")).toHaveCount(0);
+  await expectNoPageOverflow(page);
+  await expect(page).toHaveScreenshot("master-data-desktop.png", { fullPage: false });
 });
 
 test("phone pod staffing summary scrolls and opens a compact sheet", async ({ page }) => {

@@ -7,5 +7,6 @@ import "./trustCenter.css";
 import "./accessibility.css";
 import "./notifications.css";
 import "./visualFixes.css";
+import "./desktopReadability.css";
 
 createRoot(document.getElementById("root")).render(<AppErrorBoundary><App /></AppErrorBoundary>);

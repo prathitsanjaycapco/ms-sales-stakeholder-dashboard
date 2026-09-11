@@ -117,6 +117,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
         state_rows = self._rows(connection, application_state)
 
         pod_names = {row["id"]: row["name"] for row in pod_rows}
+        self.pod_heads = {row["name"]: row.get("head_stakeholder_id") for row in pod_rows if row.get("head_stakeholder_id")}
         division_by_id = {row["id"]: row for row in division_rows}
         unit_by_id = {row["id"]: row for row in unit_rows}
         base_by_id = {row["id"]: row for row in stakeholder_rows}
@@ -131,12 +132,12 @@ class PersistentStakeholderRepository(StakeholderRepository):
         self.stakeholders = {}
         for assignment in current_assignments:
             base = base_by_id[assignment["stakeholder_id"]]
-            division = division_by_id[assignment["division_id"]]
+            division = division_by_id.get(assignment["division_id"])
             unit = unit_by_id.get(assignment["business_unit_id"])
             self.stakeholders[base["id"]] = Stakeholder(
                 id=base["id"], assignment_id=assignment["id"], name=base["name"], title=base["title"],
-                pod=pod_names[assignment["pod_id"]], division=division["name"],
-                business_unit=unit["name"] if unit else "Division Leadership",
+                pod=pod_names[assignment["pod_id"]], division=division["name"] if division else None,
+                business_unit=unit["name"] if unit else ("Division Leadership" if division else None),
                 team_type=assignment["team_type"], organizational_role=assignment["organizational_role"],
                 level=base["level"], location=base["location"], country_code=base["country_code"],
                 manager_id=assignment["manager_stakeholder_id"], is_primary_technology=assignment["is_primary_technology"],
@@ -289,10 +290,10 @@ class PersistentStakeholderRepository(StakeholderRepository):
                 return self._normalized_rows(owned_connection)
         if inspect(connection).has_table("capco_employees"):
             available_employee_ids = set(connection.execute(text("SELECT id FROM capco_employees")).scalars())
-        known_pods = sorted({row["pod"] for row in self.divisions.values()} | set(self.enterprise))
+        known_pods = sorted({row["pod"] for row in self.divisions.values()} | set(self.enterprise) | set(self.pod_heads))
         # Pod IDs are the account's governed codes (ISG, Wealth Management, MSIM).
         # They are shared unchanged by operating and executive fact tables.
-        pod_rows = [{"id": name, "account_id": ACCOUNT_ID, "name": name} for name in known_pods]
+        pod_rows = [{"id": name, "account_id": ACCOUNT_ID, "name": name, "head_stakeholder_id": self.pod_heads.get(name)} for name in known_pods]
         division_rows = [{
             "id": row["id"], "pod_id": row["pod"], "name": row["name"], "color": row["color"],
             "head_stakeholder_id": row["head_stakeholder_id"],
@@ -328,7 +329,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
             })
             assignment_rows.append({
                 "id": person.assignment_id, "stakeholder_id": person.id, "pod_id": person.pod,
-                "division_id": division_id_by_scope[(person.pod, person.division)],
+                "division_id": division_id_by_scope.get((person.pod, person.division)),
                 "business_unit_id": unit_id_by_scope.get((person.pod, person.division, person.business_unit)),
                 "team_type": person.team_type, "organizational_role": person.organizational_role,
                 "manager_stakeholder_id": person.manager_id, "is_primary_technology": person.is_primary_technology,
@@ -425,6 +426,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
         }
 
     def _write_normalized(self, connection: Connection, rows: dict) -> None:
+        connection.execute(update(pods).values(head_stakeholder_id=None))
         connection.execute(delete(meeting_opportunities))
         connection.execute(delete(meeting_employees))
         connection.execute(delete(meeting_stakeholders))
@@ -450,6 +452,10 @@ class PersistentStakeholderRepository(StakeholderRepository):
             (application_state, "state"),
         ):
             values = rows[key]
+            if table is pods:
+                # Pod heads form a cycle through stakeholder assignments. Restore
+                # the reference after stakeholders and assignments are present.
+                values = [{**row, "head_stakeholder_id": None} for row in values]
             if table is divisions:
                 # Division heads form an intentional cycle (division -> stakeholder ->
                 # assignment -> division). Break it inside the transaction, then restore.
@@ -469,6 +475,10 @@ class PersistentStakeholderRepository(StakeholderRepository):
         for row in rows["divisions"]:
             connection.execute(
                 update(divisions).where(divisions.c.id == row["id"]).values(head_stakeholder_id=row["head_stakeholder_id"])
+            )
+        for row in rows["pods"]:
+            connection.execute(
+                update(pods).where(pods.c.id == row["id"]).values(head_stakeholder_id=row["head_stakeholder_id"])
             )
         desired_relationships = {row["stakeholder_id"]: row for row in rows["stakeholder_employee_relationships"]}
         current_relationships = connection.execute(
@@ -588,6 +598,8 @@ class PersistentStakeholderRepository(StakeholderRepository):
                     )
                 if key not in old_rows:
                     values = row
+                    if name == "pods":
+                        values = {**row, "head_stakeholder_id": None}
                     if name == "divisions":
                         values = {**row, "head_stakeholder_id": None}
                     connection.execute(insert(table).values(**values))
@@ -605,6 +617,11 @@ class PersistentStakeholderRepository(StakeholderRepository):
             if key not in before_maps["divisions"] or row != before_maps["divisions"][key]:
                 connection.execute(
                     update(divisions).where(divisions.c.id == row["id"]).values(head_stakeholder_id=row["head_stakeholder_id"])
+                )
+        for key, row in after_maps["pods"].items():
+            if key not in before_maps["pods"] or row != before_maps["pods"][key]:
+                connection.execute(
+                    update(pods).where(pods.c.id == row["id"]).values(head_stakeholder_id=row["head_stakeholder_id"])
                 )
 
     def _lock_generation(self, connection: Connection) -> int:
@@ -707,8 +724,21 @@ class PersistentStakeholderRepository(StakeholderRepository):
     def set_primary_technology(self, unit_id: str, stakeholder_id: str, reason: str) -> dict:
         def operation():
             prior = self.units[unit_id]["primary_technology_id"]
+            affected = {person.id for person in self.stakeholders.values() if person.id in self.units[unit_id]["technology_stakeholder_ids"] and person.manager_id == prior}
             result = super(PersistentStakeholderRepository, self).set_primary_technology(unit_id, stakeholder_id, reason)
-            for changed_id in {prior, stakeholder_id}:
+            for changed_id in {prior, stakeholder_id, *affected}:
+                if changed_id in self.stakeholders:
+                    self.stakeholders[changed_id].assignment_id = f"assignment-version-{uuid4().hex}"
+            return result
+        return self._apply(operation)
+    def set_pod_head(self, pod: str, stakeholder_id: str, reason: str) -> dict:
+        def operation():
+            result = super(PersistentStakeholderRepository, self).set_pod_head(pod, stakeholder_id, reason)
+            changed_ids = {
+                stakeholder_id, result.get("previous_stakeholder_id"),
+                *(division["head_stakeholder_id"] for division in self.divisions.values() if division["pod"] == pod),
+            }
+            for changed_id in changed_ids:
                 if changed_id in self.stakeholders:
                     self.stakeholders[changed_id].assignment_id = f"assignment-version-{uuid4().hex}"
             return result

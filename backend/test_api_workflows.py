@@ -23,6 +23,15 @@ class CriticalWorkflowTests(unittest.TestCase):
         self.assertIn(project["stakeholderId"], {item["id"] for item in pod_map["stakeholders"]})
         self.assertIn(project["opportunityId"], {item["id"] for item in pod_dashboard["opportunities"]})
 
+    def test_stakeholder_map_and_filters_support_a_scope_less_pod_head(self):
+        pod_map = self.client.get("/api/pods/ISG/map")
+        filters = self.client.get("/api/pods/ISG/filters")
+
+        self.assertEqual(200, pod_map.status_code, pod_map.text)
+        self.assertEqual(200, filters.status_code, filters.text)
+        self.assertIsNotNone(pod_map.json()["pod_head_stakeholder_id"])
+        self.assertNotIn(None, filters.json()["business_units"])
+
     def test_meeting_profile_chain_and_deployment_evidence(self):
         meetings = self.client.get("/api/meetings?pod=ISG").json()
         meeting = meetings[0]

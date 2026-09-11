@@ -132,6 +132,42 @@ def reconcile_account(repository, pod_store, executive_store, anchor: date | Non
     add("Engagements use canonical division and business-unit IDs", 0, unresolved_engagement_scope, scope="database")
     add("Operating records use canonical employee IDs", 0, unlinked_operating_people, scope="database")
 
+    hierarchy_issues = []
+    for pod_name in POD_STRUCTURE:
+        head_id = repository.pod_heads.get(pod_name)
+        for person in repository.list_stakeholders(pod=pod_name):
+            if person.id == head_id:
+                if person.organizational_role != "Pod Head" or person.manager_id is not None:
+                    hierarchy_issues.append(person.id)
+                continue
+            if person.manager_id is None:
+                hierarchy_issues.append(person.id)
+                continue
+            manager = repository.stakeholders.get(person.manager_id)
+            if manager is None or manager.pod != person.pod:
+                hierarchy_issues.append(person.id)
+                continue
+            required_manager = repository._required_structural_manager(person)
+            if required_manager and person.manager_id != required_manager:
+                hierarchy_issues.append(person.id)
+                continue
+            seen = {person.id}
+            cursor = manager
+            while cursor:
+                if cursor.id in seen:
+                    hierarchy_issues.append(person.id)
+                    break
+                seen.add(cursor.id)
+                cursor = repository.stakeholders.get(cursor.manager_id) if cursor.manager_id else None
+    hierarchy_issues = sorted(set(hierarchy_issues))
+    add(
+        "Stakeholder hierarchy has one governed root per pod and no orphans or cycles",
+        0,
+        len(hierarchy_issues),
+        scope="database",
+        evidence=hierarchy_issues[:50],
+    )
+
     # Workforce lineage is recomputed from the same persisted capacity and allocation records.
     start = date(anchor.year, ((anchor.month - 1) // 3) * 3 + 1, 1)
     end_month = start.month + 3

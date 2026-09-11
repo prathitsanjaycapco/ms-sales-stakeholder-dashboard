@@ -7,7 +7,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
-    JSON, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
+    JSON, Boolean, CheckConstraint, Column, Date, DateTime, Float, ForeignKey, Index, Integer,
     MetaData, Numeric, String, Table, Text, and_, func, insert, inspect, select, update,
 )
 from sqlalchemy.engine import Engine
@@ -31,6 +31,7 @@ resource_requirements = Table(
     Column("description", Text, nullable=False, default=""),
     Column("requested_headcount", Integer, nullable=False),
     Column("level", String(80), nullable=False),
+    Column("country_code", String(2)),
     Column("location", String(120), nullable=False),
     Column("required_skills", JSON, nullable=False, default=list),
     Column("preferred_skills", JSON, nullable=False, default=list),
@@ -39,15 +40,26 @@ resource_requirements = Table(
     Column("status", String(30), nullable=False),
     Column("request_owner_capco_employee_id", String(120), nullable=False),
     Column("client_stakeholder_id", String(180), nullable=False),
+    Column("resourcing_app_created", Boolean, nullable=False, default=True),
+    Column("bench_checked", Boolean, nullable=False, default=False),
+    Column("bench_outcome", String(40)),
+    Column("resourcing_request_submitted", Boolean, nullable=False, default=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
     Column("closed_at", DateTime(timezone=True)),
+    Column("archived_at", DateTime(timezone=True)),
+    Column("archived_by_employee_id", String(120)),
+    Column("archive_reason", Text),
+    Column("archive_root_type", String(30)),
+    Column("archive_root_id", String(150)),
     CheckConstraint("requested_headcount > 0", name="ck_resource_requirement_headcount"),
     CheckConstraint("priority IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW')", name="ck_resource_requirement_priority"),
     CheckConstraint("status IN ('DRAFT', 'OPEN', 'SOURCING', 'PARTIALLY_FILLED', 'ON_HOLD', 'FILLED', 'CANCELLED')", name="ck_resource_requirement_status"),
+    CheckConstraint("bench_outcome IS NULL OR bench_outcome IN ('CANDIDATE_AVAILABLE', 'NO_CANDIDATE', 'EXISTING_PIPELINE')", name="ck_resource_requirement_bench_outcome"),
 )
 Index("idx_resource_requirements_scope", resource_requirements.c.pod_id, resource_requirements.c.status, resource_requirements.c.target_start_date)
 Index("idx_resource_requirements_engagement", resource_requirements.c.engagement_id)
+Index("idx_resource_requirements_archive_root", resource_requirements.c.archived_at, resource_requirements.c.archive_root_type, resource_requirements.c.archive_root_id)
 
 candidates = Table(
     "resourcing_candidates", resourcing_metadata,
@@ -71,10 +83,16 @@ candidates = Table(
     Column("match_score", Integer),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("archived_at", DateTime(timezone=True)),
+    Column("archived_by_employee_id", String(120)),
+    Column("archive_reason", Text),
+    Column("archive_root_type", String(30)),
+    Column("archive_root_id", String(150)),
     CheckConstraint("match_score IS NULL OR (match_score >= 0 AND match_score <= 100)", name="ck_candidate_match_score"),
 )
 Index("idx_resourcing_candidates_requirement", candidates.c.resource_requirement_id, candidates.c.stage)
 Index("uq_resourcing_candidate_employee_requirement", candidates.c.capco_employee_id, candidates.c.resource_requirement_id, unique=True)
+Index("idx_resourcing_candidates_archive_root", candidates.c.archived_at, candidates.c.archive_root_type, candidates.c.archive_root_id)
 
 candidate_stage_history = Table(
     "candidate_stage_history", resourcing_metadata,
@@ -132,8 +150,14 @@ onboarding_records = Table(
     Column("overall_status", String(30), nullable=False),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+    Column("archived_at", DateTime(timezone=True)),
+    Column("archived_by_employee_id", String(120)),
+    Column("archive_reason", Text),
+    Column("archive_root_type", String(30)),
+    Column("archive_root_id", String(150)),
 )
 Index("idx_onboarding_expected_start", onboarding_records.c.overall_status, onboarding_records.c.expected_start_date)
+Index("idx_onboarding_records_archive_root", onboarding_records.c.archived_at, onboarding_records.c.archive_root_type, onboarding_records.c.archive_root_id)
 
 onboarding_steps = Table(
     "onboarding_steps", resourcing_metadata,
@@ -191,8 +215,20 @@ WORKFLOW = [
     ("STARTED", "Started", "CAPCO"),
 ]
 ACTIVE_REQUIREMENTS = {"OPEN", "SOURCING", "PARTIALLY_FILLED"}
-ACTIVE_CANDIDATES = {"IDENTIFIED", "CAPCO_REVIEW", "SUBMITTED_TO_MS", "MS_REVIEW", "INTERVIEW_SCHEDULED", "INTERVIEWING", "OFFER", "SELECTED"}
+PIPELINE_STAGES = ["RESUME_REVIEW", "CAPCO_INTERVIEW", "MS_INTERVIEW", "OFFER"]
+ACTIVE_CANDIDATES = set(PIPELINE_STAGES)
 ACCOUNT_TIMEZONE = ZoneInfo("America/New_York")
+OFFICE_DIRECTORY = (
+    {"code": "US", "label": "United States", "offices": ("New York", "Charlotte")},
+    {"code": "CA", "label": "Canada", "offices": ("Toronto",)},
+    {"code": "GB", "label": "United Kingdom", "offices": ("London",)},
+    {"code": "DE", "label": "Germany", "offices": ("Frankfurt",)},
+    {"code": "HK", "label": "Hong Kong", "offices": ("Hong Kong",)},
+    {"code": "IN", "label": "India", "offices": ("Mumbai",)},
+    {"code": "JP", "label": "Japan", "offices": ("Tokyo",)},
+    {"code": "SG", "label": "Singapore", "offices": ("Singapore",)},
+)
+OFFICE_COUNTRY = {office: country["code"] for country in OFFICE_DIRECTORY for office in country["offices"]}
 
 
 def utcnow():
@@ -239,8 +275,8 @@ class ResourcingStore:
         with self.engine.begin() as connection:
             for candidate_id in selected_ids:
                 if connection.execute(select(candidates.c.id).where(candidates.c.id == candidate_id)).scalar_one_or_none():
-                    connection.execute(update(candidates).where(candidates.c.id == candidate_id).values(stage="SELECTED", updated_at=now))
-                    connection.execute(update(candidate_stage_history).where(and_(candidate_stage_history.c.candidate_id == candidate_id, candidate_stage_history.c.exited_at.is_(None))).values(stage="SELECTED"))
+                    connection.execute(update(candidates).where(candidates.c.id == candidate_id).values(stage="ONBOARDING", updated_at=now))
+                    connection.execute(update(candidate_stage_history).where(and_(candidate_stage_history.c.candidate_id == candidate_id, candidate_stage_history.c.exited_at.is_(None))).values(stage="ONBOARDING"))
                     connection.execute(update(candidate_offers).where(candidate_offers.c.candidate_id == candidate_id).values(offer_status="OFFER_ACCEPTED", accepted_date=today, updated_at=now))
             if connection.execute(select(candidates.c.id).where(candidates.c.id == "candidate-009")).scalar_one_or_none():
                 connection.execute(update(candidates).where(candidates.c.id == "candidate-009").values(stage="REJECTED", updated_at=now))
@@ -287,14 +323,14 @@ class ResourcingStore:
                 "id": f"req-{index + 1:03d}", "pod_id": project["pod_id"], "division_id": project["division_id"],
                 "business_unit_id": project["business_unit_id"], "engagement_id": project["id"], "title": title, "role": role,
                 "description": f"Delivery role supporting {project['name']}.", "requested_headcount": requested, "level": level,
-                "location": location, "required_skills": skills, "preferred_skills": skills[-1:],
+                "country_code": OFFICE_COUNTRY.get(location), "location": location, "required_skills": skills, "preferred_skills": skills[-1:],
                 "target_start_date": today + timedelta(days=10 + index * 5), "priority": priority,
                 "status": "SOURCING", "request_owner_capco_employee_id": employee_ids[index % len(employee_ids)],
                 "client_stakeholder_id": client.id, "created_at": now - timedelta(days=age), "updated_at": now,
             })
 
         people = [("Priya", "Nair"), ("John", "Lee"), ("Sarah", "Patel"), ("Amit", "Rao"), ("Michael", "Chen"), ("Tawfik", "Ahmed"), ("Elena", "Garcia"), ("Daniel", "Kim"), ("Maya", "Singh"), ("Noah", "Williams"), ("Sofia", "Brooks"), ("Liam", "Morgan"), ("Chloe", "Martin"), ("Ethan", "Scott"), ("Olivia", "Turner"), ("Lucas", "Hall"), ("Grace", "Young"), ("Arjun", "Mehta"), ("Nina", "Shah"), ("James", "Park"), ("Rita", "Desai"), ("Omar", "Khan"), ("Anna", "Wilson"), ("Leo", "Davis"), ("Ivy", "Zhang")]
-        stages = ["SELECTED", "SELECTED", "INTERVIEWING", "MS_REVIEW", "INTERVIEW_SCHEDULED", "SELECTED", "CAPCO_REVIEW", "SUBMITTED_TO_MS", "REJECTED", "INTERVIEWING", "REJECTED", "CAPCO_REVIEW", "SELECTED", "SUBMITTED_TO_MS", "MS_REVIEW", "IDENTIFIED", "INTERVIEWING", "WITHDRAWN", "CAPCO_REVIEW", "MS_REVIEW", "OFFER", "SELECTED", "CAPCO_REVIEW", "SUBMITTED_TO_MS", "IDENTIFIED"]
+        stages = ["ONBOARDING", "ONBOARDING", "MS_INTERVIEW", "CAPCO_INTERVIEW", "MS_INTERVIEW", "ONBOARDING", "RESUME_REVIEW", "CAPCO_INTERVIEW", "REJECTED", "MS_INTERVIEW", "REJECTED", "RESUME_REVIEW", "ONBOARDING", "CAPCO_INTERVIEW", "CAPCO_INTERVIEW", "RESUME_REVIEW", "MS_INTERVIEW", "WITHDRAWN", "RESUME_REVIEW", "CAPCO_INTERVIEW", "OFFER", "ONBOARDING", "RESUME_REVIEW", "CAPCO_INTERVIEW", "RESUME_REVIEW"]
         candidate_rows, histories, interviews, offers, events = [], [], [], [], []
         for index, ((first, last), stage) in enumerate(zip(people, stages)):
             req = requirements[index % len(requirements)]
@@ -305,15 +341,15 @@ class ResourcingStore:
                 "candidate_type": "INTERNAL_CAPCO" if index in {0, 1, 5} else "EXTERNAL", "first_name": first, "last_name": last,
                 "email": f"{first.lower()}.{last.lower()}@example.test", "level": req["level"], "location": req["location"], "skills": req["required_skills"],
                 "stage": stage, "capco_reviewer_id": req["request_owner_capco_employee_id"], "ms_reviewer_stakeholder_id": req["client_stakeholder_id"],
-                "date_identified": identified, "date_submitted_to_ms": identified + timedelta(days=3) if stage not in {"IDENTIFIED", "CAPCO_REVIEW"} else None,
-                "expected_start_date": today + timedelta(days=8 + index * 2) if stage in {"OFFER", "SELECTED"} else None,
+                "date_identified": identified, "date_submitted_to_ms": identified + timedelta(days=3) if stage in {"MS_INTERVIEW", "OFFER", "ONBOARDING"} else None,
+                "expected_start_date": today + timedelta(days=8 + index * 2) if stage in {"OFFER", "ONBOARDING"} else None,
                 "match_score": 78 + (index * 7) % 20, "created_at": datetime.combine(identified, time.min, tzinfo=timezone.utc), "updated_at": now,
             })
-            sequence = ["IDENTIFIED"]
-            if stage != "IDENTIFIED": sequence.append("CAPCO_REVIEW")
-            if stage not in {"IDENTIFIED", "CAPCO_REVIEW", "REJECTED", "WITHDRAWN"}: sequence += ["SUBMITTED_TO_MS", "MS_REVIEW"]
-            if stage in {"INTERVIEW_SCHEDULED", "INTERVIEWING", "OFFER", "SELECTED"}: sequence.append("INTERVIEWING")
-            if stage in {"OFFER", "SELECTED", "REJECTED", "WITHDRAWN"}: sequence.append(stage)
+            sequence = ["RESUME_REVIEW"]
+            if stage in {"CAPCO_INTERVIEW", "MS_INTERVIEW", "OFFER", "ONBOARDING"}: sequence.append("CAPCO_INTERVIEW")
+            if stage in {"MS_INTERVIEW", "OFFER", "ONBOARDING"}: sequence.append("MS_INTERVIEW")
+            if stage in {"OFFER", "ONBOARDING"}: sequence.append("OFFER")
+            if stage in {"ONBOARDING", "REJECTED", "WITHDRAWN"}: sequence.append(stage)
             entered = datetime.combine(identified, time.min, tzinfo=timezone.utc)
             for sequence_index, sequence_stage in enumerate(sequence):
                 duration = [2, 3, 6, 4, 3, 2][min(sequence_index, 5)]
@@ -324,16 +360,16 @@ class ResourcingStore:
             events.append({"id": f"event-identify-{index + 1:03d}", "requirement_id": req["id"], "candidate_id": candidate_id,
                            "event_type": "CANDIDATE_IDENTIFIED", "headline": "Candidate identified", "detail": f"{first} {last} entered the pipeline.",
                            "occurred_at": datetime.combine(identified, time.min, tzinfo=timezone.utc), "actor_employee_id": req["request_owner_capco_employee_id"]})
-            if stage in {"INTERVIEW_SCHEDULED", "INTERVIEWING", "OFFER", "SELECTED"}:
+            if stage in {"CAPCO_INTERVIEW", "MS_INTERVIEW", "OFFER", "ONBOARDING"}:
                 interviews.append({"id": f"interview-{index + 1:03d}", "candidate_id": candidate_id, "interview_round": 1 + index % 2,
                                    "scheduled_at": now + timedelta(days=(index % 5) - 2), "interview_type": "Video", "ms_interviewer_stakeholder_ids": [req["client_stakeholder_id"]],
-                                   "capco_attendee_ids": [req["request_owner_capco_employee_id"]], "status": "COMPLETED" if stage in {"OFFER", "SELECTED"} else "SCHEDULED",
-                                   "feedback": "Strong functional and delivery alignment." if stage in {"OFFER", "SELECTED"} else "", "recommendation": "PROCEED" if stage in {"OFFER", "SELECTED"} else None,
+                                   "capco_attendee_ids": [req["request_owner_capco_employee_id"]], "status": "COMPLETED" if stage in {"OFFER", "ONBOARDING"} else "SCHEDULED",
+                                   "feedback": "Strong functional and delivery alignment." if stage in {"OFFER", "ONBOARDING"} else "", "recommendation": "PROCEED" if stage in {"OFFER", "ONBOARDING"} else None,
                                    "created_at": now - timedelta(days=5), "updated_at": now})
-            if stage in {"OFFER", "SELECTED"}:
+            if stage in {"OFFER", "ONBOARDING"}:
                 offers.append({"id": f"offer-{index + 1:03d}", "candidate_id": candidate_id, "proposed_rate": 190.0 + index,
-                               "agreed_rate": 185.0 + index if stage == "SELECTED" else None, "rate_currency": "USD", "offer_status": "OFFER_ACCEPTED" if stage == "SELECTED" else "RATE_NEGOTIATION",
-                               "offer_date": today - timedelta(days=4), "accepted_date": today - timedelta(days=2) if stage == "SELECTED" else None,
+                               "agreed_rate": 185.0 + index if stage == "ONBOARDING" else None, "rate_currency": "USD", "offer_status": "OFFER_ACCEPTED" if stage == "ONBOARDING" else "RATE_NEGOTIATION",
+                               "offer_date": today - timedelta(days=4), "accepted_date": today - timedelta(days=2) if stage == "ONBOARDING" else None,
                                "declined_date": None, "notes": "Commercial details restricted.", "created_at": now - timedelta(days=4), "updated_at": now})
 
         boards, steps = [], []
@@ -378,6 +414,18 @@ class ResourcingStore:
                 raise NotFoundError(f"{label} not found")
 
     @staticmethod
+    def _validate_office(values, current=None):
+        country_code = (values.get("country_code") or (current or {}).get("country_code") or "").upper()
+        location = values.get("location") or (current or {}).get("location")
+        if not country_code:
+            # Existing pre-directory records are intentionally preserved until edited.
+            return
+        valid_offices = next((country["offices"] for country in OFFICE_DIRECTORY if country["code"] == country_code), None)
+        if valid_offices is None or location not in valid_offices:
+            raise ConflictError("Select a valid office for the selected country")
+        values["country_code"] = country_code
+
+    @staticmethod
     def _assert_fresh(current, changes):
         expected = changes.pop("expected_updated_at", None)
         if expected is None:
@@ -407,11 +455,12 @@ class ResourcingStore:
             "engagements": [{key: row[key] for key in ("id", "name", "pod_id", "division_id", "business_unit_id", "division", "business_unit")} for row in project_rows],
             "employees": employee_rows,
             "stakeholders": [{"id": row.id, "name": row.name, "pod": row.pod, "division": row.division, "business_unit": row.business_unit} for row in stakeholder_rows],
+            "office_directory": [{"id": row["code"], "label": row["label"], "offices": list(row["offices"])} for row in OFFICE_DIRECTORY],
             "roles": values("role"), "levels": values("level"), "locations": values("location"),
             "skills": sorted(set(values("required_skills") + values("preferred_skills"))),
             "priorities": ["CRITICAL", "HIGH", "MEDIUM", "LOW"],
             "requirement_statuses": ["OPEN", "SOURCING", "PARTIALLY_FILLED", "FILLED", "CANCELLED"],
-            "candidate_stages": ["IDENTIFIED", "CAPCO_REVIEW", "SUBMITTED_TO_MS", "MS_REVIEW", "INTERVIEW_SCHEDULED", "INTERVIEWING", "OFFER", "SELECTED", "REJECTED", "WITHDRAWN"],
+            "candidate_stages": [*PIPELINE_STAGES, "ONBOARDING", "REJECTED", "WITHDRAWN"],
         }
 
     def list_requirements(self, pod=None):
@@ -421,17 +470,18 @@ class ResourcingStore:
             .join(engagements, engagements.c.id == resource_requirements.c.engagement_id)
             .join(employees, employees.c.id == resource_requirements.c.request_owner_capco_employee_id)
             .join(stakeholders, stakeholders.c.id == resource_requirements.c.client_stakeholder_id)
+            .where(resource_requirements.c.archived_at.is_(None))
         )
         if pod and pod != "All":
             statement = statement.where(resource_requirements.c.pod_id == pod)
         with self.engine.connect() as connection:
             rows = [dict(row) for row in connection.execute(statement.order_by(resource_requirements.c.created_at)).mappings()]
             counts = {key: value for key, value in connection.execute(
-                select(candidates.c.resource_requirement_id, func.count()).where(candidates.c.stage.notin_(["REJECTED", "WITHDRAWN"]))
+                select(candidates.c.resource_requirement_id, func.count()).where(and_(candidates.c.stage.in_(PIPELINE_STAGES), candidates.c.archived_at.is_(None)))
                 .group_by(candidates.c.resource_requirement_id)
             ).tuples()}
             fills = {key: value for key, value in connection.execute(
-                select(candidates.c.resource_requirement_id, func.count()).where(candidates.c.stage == "SELECTED")
+                select(candidates.c.resource_requirement_id, func.count()).where(and_(candidates.c.stage == "ONBOARDING", candidates.c.archived_at.is_(None)))
                 .group_by(candidates.c.resource_requirement_id)
             ).tuples()}
         for row in rows:
@@ -440,6 +490,16 @@ class ResourcingStore:
             row["remaining_headcount"] = max(0, row["requested_headcount"] - row["filled_headcount"])
             row["age_days"] = elapsed_days(row["created_at"])
             row["current_pipeline_stage"] = "No candidates" if not row["candidate_count"] else "Active pipeline"
+            if row["candidate_count"]:
+                row.update(sourcing_state="CANDIDATE_FOUND", sourcing_ready=True, sourcing_next_action="Candidate pipeline active")
+            elif not row["bench_checked"]:
+                row.update(sourcing_state="NEEDS_BENCH_CHECK", sourcing_ready=False, sourcing_next_action="Complete the bench check")
+            elif row["bench_outcome"] == "NO_CANDIDATE" and not row["resourcing_request_submitted"]:
+                row.update(sourcing_state="NEEDS_RESOURCING_REQUEST", sourcing_ready=False, sourcing_next_action="Confirm the resourcing request")
+            elif row["bench_outcome"] == "CANDIDATE_AVAILABLE":
+                row.update(sourcing_state="AWAITING_CANDIDATE_RECORD", sourcing_ready=True, sourcing_next_action="Add the bench candidate")
+            else:
+                row.update(sourcing_state="SOURCING_IN_PROGRESS", sourcing_ready=True, sourcing_next_action="Match a sourced candidate")
         return rows
 
     def get_requirement(self, requirement_id):
@@ -453,6 +513,7 @@ class ResourcingStore:
         values, now = payload.copy(), utcnow()
         values.update(id=f"req-{uuid4().hex[:12]}", created_at=now, updated_at=now)
         with self.engine.begin() as connection:
+            self._validate_office(values)
             self._validate_external_ids(connection, values)
             project = connection.execute(select(engagements).where(engagements.c.id == values["engagement_id"])).mappings().one()
             if any(values[key] != project[key] for key in ("pod_id", "division_id", "business_unit_id")):
@@ -462,15 +523,30 @@ class ResourcingStore:
 
     def update_requirement(self, requirement_id, changes):
         with self.engine.begin() as connection:
-            current = connection.execute(select(resource_requirements).where(resource_requirements.c.id == requirement_id)).mappings().one_or_none()
+            current = connection.execute(select(resource_requirements).where(and_(resource_requirements.c.id == requirement_id, resource_requirements.c.archived_at.is_(None)))).mappings().one_or_none()
             if not current:
                 raise NotFoundError("Resource requirement not found")
             self._assert_fresh(current, changes)
+            self._validate_office(changes, current)
             self._validate_external_ids(connection, changes)
+            merged = {**dict(current), **changes}
+            if not merged.get("bench_checked") and (merged.get("bench_outcome") or merged.get("resourcing_request_submitted")):
+                raise ConflictError("Complete the bench check before recording its outcome")
+            if merged.get("bench_checked") and merged.get("bench_outcome") not in {"CANDIDATE_AVAILABLE", "NO_CANDIDATE", "EXISTING_PIPELINE"}:
+                raise ConflictError("Select the bench-check outcome")
+            if merged.get("resourcing_request_submitted") and merged.get("bench_outcome") != "NO_CANDIDATE":
+                raise ConflictError("A resourcing request is only needed when the bench has no candidate")
             changes["updated_at"] = utcnow()
             if changes.get("status") in {"FILLED", "CANCELLED"}:
                 changes["closed_at"] = utcnow()
             connection.execute(update(resource_requirements).where(resource_requirements.c.id == requirement_id).values(**changes))
+            checklist_keys = {"bench_checked", "bench_outcome", "resourcing_request_submitted"}.intersection(changes)
+            if checklist_keys:
+                connection.execute(insert(resourcing_events).values(
+                    id=f"event-{uuid4().hex[:12]}", requirement_id=requirement_id,
+                    event_type="SOURCING_CHECKLIST_UPDATED", headline="Role sourcing checklist updated",
+                    detail=", ".join(f"{key}={merged.get(key)}" for key in sorted(checklist_keys)), occurred_at=changes["updated_at"],
+                ))
         return self.get_requirement(requirement_id)
 
     def list_candidates(self, pod=None, requirement_id=None):
@@ -482,6 +558,7 @@ class ResourcingStore:
             .join(engagements, engagements.c.id == resource_requirements.c.engagement_id)
             .join(employees, employees.c.id == candidates.c.capco_reviewer_id)
             .outerjoin(stakeholders, stakeholders.c.id == candidates.c.ms_reviewer_stakeholder_id)
+            .where(and_(candidates.c.archived_at.is_(None), resource_requirements.c.archived_at.is_(None)))
         )
         if pod and pod != "All": statement = statement.where(resource_requirements.c.pod_id == pod)
         if requirement_id: statement = statement.where(candidates.c.resource_requirement_id == requirement_id)
@@ -494,7 +571,7 @@ class ResourcingStore:
         for row in rows:
             row["name"] = f"{row['first_name']} {row['last_name']}"
             row["stage_age_days"] = elapsed_days(current_history.get(row["id"], row["updated_at"]))
-            row["overdue"] = row["stage"] == "MS_REVIEW" and row["stage_age_days"] > 3
+            row["overdue"] = row["stage"] == "MS_INTERVIEW" and row["stage_age_days"] > 3
         return rows
 
     def get_candidate(self, candidate_id):
@@ -521,30 +598,61 @@ class ResourcingStore:
         values, now = payload.copy(), utcnow()
         values.update(id=f"candidate-{uuid4().hex[:12]}", date_identified=date.today(), created_at=now, updated_at=now)
         with self.engine.begin() as connection:
-            requirement = connection.execute(select(resource_requirements.c.id).where(resource_requirements.c.id == values["resource_requirement_id"])).scalar_one_or_none()
+            requirement = connection.execute(select(resource_requirements.c.id).where(and_(resource_requirements.c.id == values["resource_requirement_id"], resource_requirements.c.archived_at.is_(None)))).scalar_one_or_none()
             if not requirement: raise NotFoundError("Resource requirement not found")
             self._validate_external_ids(connection, values)
             connection.execute(insert(candidates).values(**values))
             connection.execute(insert(candidate_stage_history).values(id=f"history-{uuid4().hex[:12]}", candidate_id=values["id"], stage=values["stage"], entered_at=now, note=""))
         return self.get_candidate(values["id"])
 
+    def transition_candidate(self, candidate_id, payload, actor=None):
+        action = payload.get("action")
+        target = payload.get("target_stage")
+        reason = (payload.get("reason") or "").strip()
+        current = self.get_candidate(candidate_id)
+        expected = payload.get("expected_updated_at")
+        if expected and expected != current["updated_at"]:
+            raise ConflictError("This candidate changed after you opened it; refresh and try again")
+        if action == "ADVANCE":
+            if current["stage"] not in PIPELINE_STAGES[:-1]:
+                raise ConflictError("This candidate cannot advance from the current stage")
+            next_stage = PIPELINE_STAGES[PIPELINE_STAGES.index(current["stage"]) + 1]
+            if target and target != next_stage:
+                raise ConflictError("Candidates may only advance to the next pipeline stage")
+            target = next_stage
+            reason = reason or f"Advanced from {current['stage']}"
+        elif action == "REJECT":
+            target = "REJECTED"
+        elif action == "WITHDRAW":
+            target = "WITHDRAWN"
+        elif action == "CORRECT":
+            if target not in PIPELINE_STAGES:
+                raise ConflictError("Corrections may only target an active pipeline stage")
+        else:
+            raise ConflictError("Unknown candidate transition")
+        return self.update_candidate(candidate_id, {"stage": target, "expected_updated_at": current["updated_at"], "note": reason}, actor)
+
     def update_candidate(self, candidate_id, changes, actor=None):
         note = changes.pop("note", "") or ""
         with self.engine.begin() as connection:
-            current = connection.execute(select(candidates).where(candidates.c.id == candidate_id)).mappings().one_or_none()
+            current = connection.execute(select(candidates).where(and_(candidates.c.id == candidate_id, candidates.c.archived_at.is_(None)))).mappings().one_or_none()
             if not current: raise NotFoundError("Candidate not found")
             self._assert_fresh(current, changes)
             self._validate_external_ids(connection, changes)
             now, new_stage = utcnow(), changes.get("stage")
+            expected_start_changed = "expected_start_date" in changes
+            expected_start = changes.get("expected_start_date")
             if new_stage and new_stage != current["stage"]:
                 connection.execute(update(candidate_stage_history).where(and_(candidate_stage_history.c.candidate_id == candidate_id, candidate_stage_history.c.exited_at.is_(None))).values(exited_at=now))
                 connection.execute(insert(candidate_stage_history).values(id=f"history-{uuid4().hex[:12]}", candidate_id=candidate_id, stage=new_stage, entered_at=now, changed_by_employee_id=actor, note=note))
-                if new_stage == "SUBMITTED_TO_MS" and not current["date_submitted_to_ms"]:
+                if new_stage == "MS_INTERVIEW" and not current["date_submitted_to_ms"]:
                     changes["date_submitted_to_ms"] = date.today()
             changes["updated_at"] = now
             connection.execute(update(candidates).where(candidates.c.id == candidate_id).values(**changes))
-            connection.execute(insert(resourcing_events).values(id=f"event-{uuid4().hex[:12]}", requirement_id=current["resource_requirement_id"], candidate_id=candidate_id, event_type="STAGE_CHANGED", headline=f"Stage changed to {new_stage or current['stage']}", detail=note, occurred_at=now, actor_employee_id=actor))
-            if new_stage == "SELECTED":
+            if expected_start_changed:
+                connection.execute(update(onboarding_records).where(and_(onboarding_records.c.candidate_id == candidate_id, onboarding_records.c.archived_at.is_(None))).values(expected_start_date=expected_start, updated_at=now))
+            connection.execute(insert(resourcing_events).values(id=f"event-{uuid4().hex[:12]}", requirement_id=current["resource_requirement_id"], candidate_id=candidate_id, event_type="STAGE_CHANGED" if new_stage else "CANDIDATE_UPDATED", headline=f"Stage changed to {new_stage}" if new_stage else "Candidate details updated", detail=note, occurred_at=now, actor_employee_id=actor))
+            if new_stage == "ONBOARDING":
                 self._ensure_onboarding(connection, candidate_id, changes.get("expected_start_date") or current["expected_start_date"])
         return self.get_candidate(candidate_id)
 
@@ -567,7 +675,7 @@ class ResourcingStore:
         values, now = payload.copy(), utcnow()
         values.update(id=f"interview-{uuid4().hex[:12]}", candidate_id=candidate_id, created_at=now, updated_at=now)
         with self.engine.begin() as connection:
-            if connection.execute(select(candidates.c.id).where(candidates.c.id == candidate_id)).scalar_one_or_none() is None:
+            if connection.execute(select(candidates.c.id).where(and_(candidates.c.id == candidate_id, candidates.c.archived_at.is_(None)))).scalar_one_or_none() is None:
                 raise NotFoundError("Candidate not found")
             connection.execute(insert(candidate_interviews).values(**values))
         return values
@@ -585,7 +693,7 @@ class ResourcingStore:
     def upsert_offer(self, candidate_id, payload):
         now = utcnow()
         with self.engine.begin() as connection:
-            candidate = connection.execute(select(candidates).where(candidates.c.id == candidate_id)).mappings().one_or_none()
+            candidate = connection.execute(select(candidates).where(and_(candidates.c.id == candidate_id, candidates.c.archived_at.is_(None)))).mappings().one_or_none()
             if not candidate: raise NotFoundError("Candidate not found")
             current = connection.execute(select(candidate_offers).where(candidate_offers.c.candidate_id == candidate_id)).mappings().one_or_none()
             values = payload.copy()
@@ -604,10 +712,24 @@ class ResourcingStore:
                 offer_id = f"offer-{uuid4().hex[:12]}"
                 values.update(id=offer_id, candidate_id=candidate_id, offer_date=date.today(), created_at=now)
                 connection.execute(insert(candidate_offers).values(**values))
-            if status_value == "OFFER_ACCEPTED":
+            if status_value == "OFFER_ACCEPTED" and candidate["stage"] != "ONBOARDING":
+                requirement = connection.execute(select(resource_requirements).where(and_(resource_requirements.c.id == candidate["resource_requirement_id"], resource_requirements.c.archived_at.is_(None)))).mappings().one_or_none()
+                if requirement is None:
+                    raise NotFoundError("Resource requirement not found")
+                reserved = connection.execute(
+                    select(func.count()).select_from(candidates).where(and_(
+                        candidates.c.resource_requirement_id == requirement["id"],
+                        candidates.c.stage == "ONBOARDING", candidates.c.archived_at.is_(None),
+                    ))
+                ).scalar_one()
+                if reserved >= requirement["requested_headcount"]:
+                    raise ConflictError("This role has no remaining headcount. Choose another candidate or correct the role headcount before accepting this offer.")
                 connection.execute(update(candidate_stage_history).where(and_(candidate_stage_history.c.candidate_id == candidate_id, candidate_stage_history.c.exited_at.is_(None))).values(exited_at=now))
-                connection.execute(insert(candidate_stage_history).values(id=f"history-{uuid4().hex[:12]}", candidate_id=candidate_id, stage="SELECTED", entered_at=now, note="Offer accepted"))
-                connection.execute(update(candidates).where(candidates.c.id == candidate_id).values(stage="SELECTED", updated_at=now))
+                connection.execute(insert(candidate_stage_history).values(id=f"history-{uuid4().hex[:12]}", candidate_id=candidate_id, stage="ONBOARDING", entered_at=now, note="Offer accepted; handed to onboarding"))
+                connection.execute(update(candidates).where(candidates.c.id == candidate_id).values(stage="ONBOARDING", updated_at=now))
+                next_reserved = reserved + 1
+                requirement_status = "FILLED" if next_reserved >= requirement["requested_headcount"] else "PARTIALLY_FILLED"
+                connection.execute(update(resource_requirements).where(resource_requirements.c.id == requirement["id"]).values(status=requirement_status, updated_at=now))
                 self._ensure_onboarding(connection, candidate_id, candidate["expected_start_date"])
             return dict(connection.execute(select(candidate_offers).where(candidate_offers.c.id == offer_id)).mappings().one())
 
@@ -628,6 +750,7 @@ class ResourcingStore:
             .join(resource_requirements, resource_requirements.c.id == candidates.c.resource_requirement_id)
             .join(engagements, engagements.c.id == resource_requirements.c.engagement_id)
             .join(employees, employees.c.id == candidates.c.capco_reviewer_id)
+            .where(and_(onboarding_records.c.archived_at.is_(None), candidates.c.archived_at.is_(None), resource_requirements.c.archived_at.is_(None)))
         )
         if pod and pod != "All": statement = statement.where(resource_requirements.c.pod_id == pod)
         with self.engine.connect() as connection:
@@ -675,9 +798,107 @@ class ResourcingStore:
             ).mappings()]
         return result
 
+    @staticmethod
+    def _archive_values(now, actor, reason, root_type, root_id):
+        return {
+            "archived_at": now, "archived_by_employee_id": actor,
+            "archive_reason": (reason or "Removed from the active resourcing workflow").strip(),
+            "archive_root_type": root_type, "archive_root_id": root_id,
+        }
+
+    def archive_requirement(self, requirement_id, reason="", actor=None):
+        now = utcnow()
+        values = self._archive_values(now, actor, reason, "ROLE", requirement_id)
+        with self.engine.begin() as connection:
+            role = connection.execute(select(resource_requirements).where(and_(resource_requirements.c.id == requirement_id, resource_requirements.c.archived_at.is_(None)))).mappings().one_or_none()
+            if role is None:
+                raise NotFoundError("Active resource requirement not found")
+            candidate_ids = list(connection.execute(select(candidates.c.id).where(and_(candidates.c.resource_requirement_id == requirement_id, candidates.c.archived_at.is_(None)))).scalars())
+            connection.execute(update(resource_requirements).where(resource_requirements.c.id == requirement_id).values(**values))
+            if candidate_ids:
+                connection.execute(update(candidates).where(and_(candidates.c.id.in_(candidate_ids), candidates.c.archived_at.is_(None))).values(**values))
+                connection.execute(update(onboarding_records).where(and_(onboarding_records.c.candidate_id.in_(candidate_ids), onboarding_records.c.archived_at.is_(None))).values(**values))
+        return {"id": requirement_id, "type": "ROLE", "archived_at": now}
+
+    def archive_candidate(self, candidate_id, reason="", actor=None):
+        now = utcnow()
+        values = self._archive_values(now, actor, reason, "CANDIDATE", candidate_id)
+        with self.engine.begin() as connection:
+            candidate = connection.execute(select(candidates).where(and_(candidates.c.id == candidate_id, candidates.c.archived_at.is_(None)))).mappings().one_or_none()
+            if candidate is None:
+                raise NotFoundError("Active candidate not found")
+            connection.execute(update(candidates).where(candidates.c.id == candidate_id).values(**values))
+            connection.execute(update(onboarding_records).where(and_(onboarding_records.c.candidate_id == candidate_id, onboarding_records.c.archived_at.is_(None))).values(**values))
+        return {"id": candidate_id, "type": "CANDIDATE", "archived_at": now}
+
+    def archive_onboarding(self, onboarding_id, reason="", actor=None):
+        now = utcnow()
+        values = self._archive_values(now, actor, reason, "ONBOARDING", onboarding_id)
+        with self.engine.begin() as connection:
+            board = connection.execute(select(onboarding_records).where(and_(onboarding_records.c.id == onboarding_id, onboarding_records.c.archived_at.is_(None)))).mappings().one_or_none()
+            if board is None:
+                raise NotFoundError("Active onboarding record not found")
+            candidate = connection.execute(select(candidates).where(candidates.c.id == board["candidate_id"])).mappings().one()
+            if candidate["archived_at"] is not None:
+                raise ConflictError("This candidate is already in Trash as part of another item")
+            connection.execute(update(onboarding_records).where(onboarding_records.c.id == onboarding_id).values(**values))
+            connection.execute(update(candidates).where(candidates.c.id == board["candidate_id"]).values(**values))
+        return {"id": onboarding_id, "type": "ONBOARDING", "archived_at": now}
+
+    def list_trash(self, pod=None):
+        items = []
+        with self.engine.connect() as connection:
+            people = {key: value for key, value in connection.execute(select(employees.c.id, employees.c.name)).tuples()}
+            role_statement = select(resource_requirements, engagements.c.name.label("project_name")).join(engagements, engagements.c.id == resource_requirements.c.engagement_id).where(and_(resource_requirements.c.archived_at.is_not(None), resource_requirements.c.archive_root_type == "ROLE", resource_requirements.c.archive_root_id == resource_requirements.c.id))
+            candidate_statement = select(candidates, resource_requirements.c.title.label("requirement_title"), resource_requirements.c.pod_id, engagements.c.name.label("project_name")).join(resource_requirements, resource_requirements.c.id == candidates.c.resource_requirement_id).join(engagements, engagements.c.id == resource_requirements.c.engagement_id).where(and_(candidates.c.archived_at.is_not(None), candidates.c.archive_root_type == "CANDIDATE", candidates.c.archive_root_id == candidates.c.id))
+            onboarding_statement = select(onboarding_records, candidates.c.first_name, candidates.c.last_name, resource_requirements.c.title.label("requirement_title"), resource_requirements.c.pod_id, engagements.c.name.label("project_name")).join(candidates, candidates.c.id == onboarding_records.c.candidate_id).join(resource_requirements, resource_requirements.c.id == candidates.c.resource_requirement_id).join(engagements, engagements.c.id == resource_requirements.c.engagement_id).where(and_(onboarding_records.c.archived_at.is_not(None), onboarding_records.c.archive_root_type == "ONBOARDING", onboarding_records.c.archive_root_id == onboarding_records.c.id))
+            if pod and pod != "All":
+                role_statement = role_statement.where(resource_requirements.c.pod_id == pod)
+                candidate_statement = candidate_statement.where(resource_requirements.c.pod_id == pod)
+                onboarding_statement = onboarding_statement.where(resource_requirements.c.pod_id == pod)
+            role_rows = [dict(row) for row in connection.execute(role_statement).mappings()]
+            candidate_rows = [dict(row) for row in connection.execute(candidate_statement).mappings()]
+            onboarding_rows = [dict(row) for row in connection.execute(onboarding_statement).mappings()]
+            for row in role_rows:
+                affected_candidates = connection.execute(select(func.count()).select_from(candidates).where(and_(candidates.c.archive_root_type == "ROLE", candidates.c.archive_root_id == row["id"]))).scalar_one()
+                affected_boards = connection.execute(select(func.count()).select_from(onboarding_records).where(and_(onboarding_records.c.archive_root_type == "ROLE", onboarding_records.c.archive_root_id == row["id"]))).scalar_one()
+                items.append({"id": row["id"], "type": "ROLE", "label": row["title"], "context": row["project_name"], "pod_id": row["pod_id"], "affected_count": 1 + affected_candidates + affected_boards, **{key: row[key] for key in ("archived_at", "archived_by_employee_id", "archive_reason")}})
+            for row in candidate_rows:
+                affected_boards = connection.execute(select(func.count()).select_from(onboarding_records).where(and_(onboarding_records.c.archive_root_type == "CANDIDATE", onboarding_records.c.archive_root_id == row["id"]))).scalar_one()
+                items.append({"id": row["id"], "type": "CANDIDATE", "label": f"{row['first_name']} {row['last_name']}", "context": f"{row['requirement_title']} / {row['project_name']}", "pod_id": row["pod_id"], "affected_count": 1 + affected_boards, **{key: row[key] for key in ("archived_at", "archived_by_employee_id", "archive_reason")}})
+            for row in onboarding_rows:
+                items.append({"id": row["id"], "type": "ONBOARDING", "label": f"{row['first_name']} {row['last_name']}", "context": f"{row['requirement_title']} / {row['project_name']}", "pod_id": row["pod_id"], "affected_count": 2, **{key: row[key] for key in ("archived_at", "archived_by_employee_id", "archive_reason")}})
+        for item in items:
+            item["archived_by_name"] = people.get(item["archived_by_employee_id"], "Unknown user")
+        return sorted(items, key=lambda item: item["archived_at"], reverse=True)
+
+    def restore_trash_item(self, item_type, item_id):
+        item_type = item_type.upper()
+        if item_type not in {"ROLE", "CANDIDATE", "ONBOARDING"}:
+            raise NotFoundError("Trash item not found")
+        table = {"ROLE": resource_requirements, "CANDIDATE": candidates, "ONBOARDING": onboarding_records}[item_type]
+        clear = {"archived_at": None, "archived_by_employee_id": None, "archive_reason": None, "archive_root_type": None, "archive_root_id": None}
+        with self.engine.begin() as connection:
+            root = connection.execute(select(table).where(and_(table.c.id == item_id, table.c.archived_at.is_not(None), table.c.archive_root_type == item_type, table.c.archive_root_id == item_id))).mappings().one_or_none()
+            if root is None:
+                raise NotFoundError("Trash item not found")
+            if item_type == "ROLE":
+                connection.execute(update(resource_requirements).where(resource_requirements.c.id == item_id).values(**clear))
+                connection.execute(update(candidates).where(and_(candidates.c.archive_root_type == item_type, candidates.c.archive_root_id == item_id)).values(**clear))
+                connection.execute(update(onboarding_records).where(and_(onboarding_records.c.archive_root_type == item_type, onboarding_records.c.archive_root_id == item_id)).values(**clear))
+            else:
+                candidate_id = item_id if item_type == "CANDIDATE" else root["candidate_id"]
+                candidate = connection.execute(select(candidates).where(candidates.c.id == candidate_id)).mappings().one()
+                role_archived = connection.execute(select(resource_requirements.c.archived_at).where(resource_requirements.c.id == candidate["resource_requirement_id"])).scalar_one()
+                if role_archived is not None:
+                    raise ConflictError("Restore the parent role first")
+                connection.execute(update(candidates).where(and_(candidates.c.archive_root_type == item_type, candidates.c.archive_root_id == item_id)).values(**clear))
+                connection.execute(update(onboarding_records).where(and_(onboarding_records.c.archive_root_type == item_type, onboarding_records.c.archive_root_id == item_id)).values(**clear))
+        return {"id": item_id, "type": item_type, "restored": True}
+
     def update_onboarding(self, onboarding_id, changes):
         with self.engine.begin() as connection:
-            current = connection.execute(select(onboarding_records).where(onboarding_records.c.id == onboarding_id)).mappings().one_or_none()
+            current = connection.execute(select(onboarding_records).where(and_(onboarding_records.c.id == onboarding_id, onboarding_records.c.archived_at.is_(None)))).mappings().one_or_none()
             if current is None:
                 raise NotFoundError("Onboarding record not found")
             self._assert_fresh(current, changes)
@@ -688,6 +909,8 @@ class ResourcingStore:
     def update_step(self, onboarding_id, step_id, changes):
         now = utcnow()
         with self.engine.begin() as connection:
+            if connection.execute(select(onboarding_records.c.id).where(and_(onboarding_records.c.id == onboarding_id, onboarding_records.c.archived_at.is_(None)))).scalar_one_or_none() is None:
+                raise NotFoundError("Onboarding record not found")
             current = connection.execute(select(onboarding_steps).where(and_(onboarding_steps.c.id == step_id, onboarding_steps.c.onboarding_record_id == onboarding_id))).mappings().one_or_none()
             if not current: raise NotFoundError("Onboarding step not found")
             self._assert_fresh(current, changes)
@@ -757,14 +980,14 @@ class ResourcingStore:
         with self.engine.connect() as connection:
             histories = [dict(row) for row in connection.execute(select(candidate_stage_history)).mappings() if row.candidate_id in candidates_in_scope]
         durations, waiting = defaultdict(list), defaultdict(int)
-        stage_labels = {"CAPCO_REVIEW": "Candidate Review", "MS_REVIEW": "MS Review", "INTERVIEWING": "Interview", "OFFER": "Offer"}
+        stage_labels = {"RESUME_REVIEW": "Resume Review", "CAPCO_INTERVIEW": "Capco Interview", "MS_INTERVIEW": "MS Interview", "OFFER": "Offer", "CAPCO_REVIEW": "Resume Review", "MS_REVIEW": "Capco Interview", "INTERVIEWING": "MS Interview"}
         for row in histories:
             label = stage_labels.get(row["stage"])
             if not label: continue
             if row["exited_at"]: durations[label].append(elapsed_days(row["entered_at"], row["exited_at"]))
             else: waiting[label] += 1
         durations["Onboarding"] = [elapsed_days(board["created_at"], board["actual_start_date"] or board["updated_at"]) for board in boards if board["overall_status"] == "COMPLETE"]
-        targets = {"Candidate Review": 2, "MS Review": 3, "Interview": 4, "Offer": 3, "Onboarding": 14}
+        targets = {"Resume Review": 2, "Capco Interview": 3, "MS Interview": 4, "Offer": 3, "Onboarding": 14}
         return [{
             "stage": stage, "average_days": round(mean(durations.get(stage, [])), 1) if durations.get(stage) else None,
             "sample_size": len(durations.get(stage, [])),
@@ -776,17 +999,17 @@ class ResourcingStore:
         requirements, candidate_rows, boards = self.list_requirements(pod), self.list_candidates(pod), self.list_onboarding(pod)
         active_roles = [row for row in requirements if row["status"] in ACTIVE_REQUIREMENTS]
         active_candidates = [row for row in candidate_rows if row["stage"] in ACTIVE_CANDIDATES]
-        offers = [row for row in candidate_rows if row["stage"] in {"OFFER", "SELECTED"}]
+        offers = [row for row in candidate_rows if row["stage"] == "OFFER"]
         active_boards = [row for row in boards if row["overall_status"] != "COMPLETE" and not row["actual_start_date"]]
         starting = [row for row in active_boards if row["expected_start_date"] and 0 <= (row["expected_start_date"] - date.today()).days < 30]
         analytics = self.analytics(pod)
         with self.engine.connect() as connection:
             selected_at = {candidate_id: entered_at for candidate_id, entered_at in connection.execute(
                 select(candidate_stage_history.c.candidate_id, func.min(candidate_stage_history.c.entered_at))
-                .where(candidate_stage_history.c.stage == "SELECTED").group_by(candidate_stage_history.c.candidate_id)
+                .where(candidate_stage_history.c.stage.in_(["ONBOARDING", "SELECTED"])).group_by(candidate_stage_history.c.candidate_id)
             ).tuples()}
         time_to_fill = []
-        for candidate in [row for row in candidate_rows if row["stage"] == "SELECTED"]:
+        for candidate in [row for row in candidate_rows if row["stage"] == "ONBOARDING"]:
             requirement = next(row for row in requirements if row["id"] == candidate["resource_requirement_id"])
             if selected_at.get(candidate["id"]):
                 time_to_fill.append(elapsed_days(requirement["created_at"], selected_at[candidate["id"]]))
@@ -801,9 +1024,9 @@ class ResourcingStore:
         for row in active_roles: role_summary[row["role"]] += row["remaining_headcount"]
         funnel = [
             ("Demand", sum(row["remaining_headcount"] for row in active_roles)),
-            ("Sourcing", sum(row["stage"] in {"IDENTIFIED", "CAPCO_REVIEW"} for row in active_candidates)),
-            ("MS Review", sum(row["stage"] in {"SUBMITTED_TO_MS", "MS_REVIEW"} for row in active_candidates)),
-            ("Interview", sum(row["stage"] in {"INTERVIEW_SCHEDULED", "INTERVIEWING"} for row in active_candidates)),
+            ("Resume Review", sum(row["stage"] == "RESUME_REVIEW" for row in active_candidates)),
+            ("Capco Interview", sum(row["stage"] == "CAPCO_INTERVIEW" for row in active_candidates)),
+            ("MS Interview", sum(row["stage"] == "MS_INTERVIEW" for row in active_candidates)),
             ("Offer", len(offers)), ("Onboarding", len(active_boards)), ("Started", sum(bool(row["actual_start_date"]) for row in boards)),
         ]
         onboarding_average = next((row["average_days"] for row in analytics if row["stage"] == "Onboarding"), None)
@@ -811,7 +1034,7 @@ class ResourcingStore:
             "generated_at": utcnow(), "pod": pod or "All",
             "metrics": {
                 "open_demand": sum(row["remaining_headcount"] for row in active_roles), "critical_roles": sum(row["priority"] == "CRITICAL" for row in active_roles),
-                "candidates": len(active_candidates), "with_ms": sum(row["stage"] in {"SUBMITTED_TO_MS", "MS_REVIEW"} for row in active_candidates),
+                "candidates": len(active_candidates), "with_ms": sum(row["stage"] == "MS_INTERVIEW" for row in active_candidates),
                 "offers": len(offers), "pending_offers": sum(row["stage"] == "OFFER" for row in offers), "onboarding": len(active_boards),
                 "blocked": sum(row["blocked_steps"] > 0 for row in active_boards), "starting_30_days": len(starting),
                 "starting_at_risk": sum(row["risk"] == "START_AT_RISK" for row in starting), "roles_over_30_days": sum(row["age_days"] > 30 for row in active_roles),
@@ -828,7 +1051,7 @@ class ResourcingStore:
     def start_candidate(self, onboarding_id):
         now, today = utcnow(), date.today()
         with self.engine.begin() as connection:
-            board = connection.execute(select(onboarding_records).where(onboarding_records.c.id == onboarding_id)).mappings().one_or_none()
+            board = connection.execute(select(onboarding_records).where(and_(onboarding_records.c.id == onboarding_id, onboarding_records.c.archived_at.is_(None)))).mappings().one_or_none()
             if not board: raise NotFoundError("Onboarding record not found")
             if board["actual_start_date"]:
                 raise ConflictError("This candidate has already started")
@@ -841,7 +1064,7 @@ class ResourcingStore:
             if not employee_id:
                 employee_id = f"capco-{uuid4().hex[:12]}"
                 connection.execute(insert(employees).values(id=employee_id, name=f"{candidate['first_name']} {candidate['last_name']}", first_name=candidate["first_name"], last_name=candidate["last_name"], title=candidate["level"], level=candidate["level"], role=requirement["role"], capability=requirement["role"], location=candidate["location"], active=True, source_system="resourcing", source_record_id=candidate["id"], created_at=now, updated_at=now))
-                connection.execute(update(candidates).where(candidates.c.id == candidate["id"]).values(capco_employee_id=employee_id, stage="SELECTED", updated_at=now))
+                connection.execute(update(candidates).where(candidates.c.id == candidate["id"]).values(capco_employee_id=employee_id, stage="ONBOARDING", updated_at=now))
             existing_allocation = connection.execute(select(func.coalesce(func.sum(engagement_assignments.c.allocation_percent), 0)).where(
                 engagement_assignments.c.employee_id == employee_id,
                 engagement_assignments.c.status.in_(["Active", "Planned"]),
