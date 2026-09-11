@@ -53,8 +53,6 @@ DOCUMENT_STORAGE_BACKEND=filesystem
 DOCUMENT_STORAGE_DURABLE=true
 AUTH_MODE=trusted_proxy
 TRUSTED_PROXY_SECRET=<long random gateway-to-api secret>
-AI_PROVIDER=local
-AI_MAX_SOURCES=8
 ```
 
 Production startup fails when PostgreSQL is unavailable, when the canonical schema has not been migrated, when the database is empty, when an in-memory repository is selected, when authenticated-proxy configuration is absent, when durable upload storage is not explicitly configured, or when localhost CORS origins are configured. Startup never creates schema or inserts demo data in this mode.
@@ -122,20 +120,3 @@ The response validates account and per-pod pipeline totals, weighted pipeline, c
 ## Security boundary
 
 The API validates domain inputs and document extensions/sizes, uses parameterized SQLAlchemy statements, returns controlled domain errors, enforces role-based writes, records mutation audit events, and keeps CORS environment-specific. The trusted-proxy mode is the application half of SSO: production still requires a correctly configured corporate identity gateway. Filesystem uploads must be placed on private durable storage; malware scanning, retention, backup, TLS termination, and disaster recovery remain deployment responsibilities.
-
-## Grounded account assistant
-
-The global assistant uses the same PostgreSQL account model as every screen. It retrieves current stakeholders, meetings, notes, opportunities, engagements, employees, tasks, critical items, milestones, and canonical Executive metrics directly from their governed records. Uploaded PDF, DOCX, XLSX/XLSM, PPTX, text, CSV, RTF, and EML content is extracted into `assistant_document_chunks`; each chunk retains a foreign key to `stakeholder_documents`. Legacy binary Office files, images, and scanned PDFs remain visible as document metadata but require conversion or OCR before their contents can be retrieved.
-
-Conversations and citations are stored in `assistant_conversations` and `assistant_messages` and are isolated by authenticated subject. Readers may ask questions, while document reindexing is restricted to Account Admin. The assistant refuses questions with no relevant Morgan Stanley account evidence and does not use web search.
-
-The safe default is `AI_PROVIDER=local`, which produces extractive grounded answers without sending account data outside the application. Model-generated answers are opt-in:
-
-```text
-AI_PROVIDER=openai
-AI_MODEL=<enterprise-approved-model-id>
-OPENAI_API_KEY=<secret>
-AI_EXTERNAL_DATA_APPROVED=true
-```
-
-Only retrieved excerpts are sent, provider response storage is disabled, and the API key is never exposed to the browser. Enterprise legal, privacy, data-residency, and vendor approval is still required before enabling an external provider for client or commercial data.

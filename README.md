@@ -32,7 +32,7 @@ npm.cmd run test:ci
 python -m alembic -c alembic.ini check
 ```
 
-Before deployment, verify `GET /api/health/ready` is ready and `GET /api/integrity/reconciliation` is passed. The Settings → Trust & operations screen surfaces the same evidence, data freshness, audit history, and assistant index state.
+Before deployment, verify `GET /api/health/ready` is ready and `GET /api/integrity/reconciliation` is passed. The Settings → Trust & operations screen surfaces the same evidence, data freshness, and audit history.
 
 ## Deployment
 

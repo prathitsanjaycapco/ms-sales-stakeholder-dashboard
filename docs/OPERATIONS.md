@@ -26,7 +26,7 @@ Place uploads in private durable storage. A production ingress or storage event 
 
 ## Observability
 
-Collect structured API logs and preserve `X-Request-ID` through every proxy. Alert on readiness failures, elevated 5xx/409 rates, audit-persistence failures, database saturation, storage exhaustion, stale source feeds, failed reconciliation, and assistant indexing errors. Browser errors should be sent only to an enterprise-approved telemetry service and must exclude client data.
+Collect structured API logs and preserve `X-Request-ID` through every proxy. Alert on readiness failures, elevated 5xx/409 rates, audit-persistence failures, database saturation, storage exhaustion, stale source feeds, and failed reconciliation. Browser errors should be sent only to an enterprise-approved telemetry service and must exclude client data.
 
 ## Notifications and integrations
 

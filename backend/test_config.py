@@ -38,12 +38,5 @@ class ProductionConfigurationTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "DOCUMENT_STORAGE_DURABLE"):
                 Settings.from_environment()
 
-    def test_external_ai_requires_key_model_and_explicit_data_approval(self):
-        environment = {"APP_ENV": "development", "AI_PROVIDER": "openai", "OPENAI_API_KEY": "test-key", "AI_MODEL": "approved-model"}
-        with patch.dict("os.environ", environment, clear=True):
-            with self.assertRaisesRegex(RuntimeError, "AI_EXTERNAL_DATA_APPROVED"):
-                Settings.from_environment()
-
-
 if __name__ == "__main__":
     unittest.main()

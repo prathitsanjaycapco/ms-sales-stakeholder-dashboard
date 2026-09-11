@@ -44,11 +44,6 @@ class Settings:
     development_roles: tuple[str, ...]
     document_storage_backend: str
     document_storage_durable: bool
-    ai_provider: str
-    ai_model: str | None
-    ai_api_key: str | None
-    ai_external_data_approved: bool
-    ai_max_sources: int
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -73,19 +68,6 @@ class Settings:
         document_storage_durable = _bool("DOCUMENT_STORAGE_DURABLE", environment != "production")
         if environment == "production" and not document_storage_durable:
             raise RuntimeError("Production filesystem uploads require DOCUMENT_STORAGE_DURABLE=true and a durable UPLOAD_ROOT")
-        ai_provider = os.getenv("AI_PROVIDER", "local").strip().lower()
-        if ai_provider not in {"local", "openai"}:
-            raise RuntimeError("AI_PROVIDER must be local or openai")
-        ai_api_key = os.getenv("OPENAI_API_KEY") or None
-        ai_model = os.getenv("AI_MODEL") or None
-        ai_external_data_approved = _bool("AI_EXTERNAL_DATA_APPROVED", False)
-        if ai_provider == "openai" and (not ai_api_key or not ai_model):
-            raise RuntimeError("AI_PROVIDER=openai requires OPENAI_API_KEY and AI_MODEL")
-        if ai_provider == "openai" and not ai_external_data_approved:
-            raise RuntimeError("AI_PROVIDER=openai requires AI_EXTERNAL_DATA_APPROVED=true")
-        ai_max_sources = int(os.getenv("AI_MAX_SOURCES", "8"))
-        if not 1 <= ai_max_sources <= 20:
-            raise RuntimeError("AI_MAX_SOURCES must be between 1 and 20")
         return cls(
             environment=environment,
             database_url=database_url,
@@ -101,11 +83,6 @@ class Settings:
             development_roles=tuple(value.strip() for value in os.getenv("DEVELOPMENT_ROLES", "Account Admin").split(",") if value.strip()),
             document_storage_backend=document_storage_backend,
             document_storage_durable=document_storage_durable,
-            ai_provider=ai_provider,
-            ai_model=ai_model,
-            ai_api_key=ai_api_key,
-            ai_external_data_approved=ai_external_data_approved,
-            ai_max_sources=ai_max_sources,
         )
 
 

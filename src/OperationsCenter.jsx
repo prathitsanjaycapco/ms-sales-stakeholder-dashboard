@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
-  Activity, AlertTriangle, Bot, CheckCircle2, Clock3, Database,
+  Activity, AlertTriangle, CheckCircle2, Clock3, Database,
   History, RefreshCw, ShieldCheck,
 } from "lucide-react";
 import { api } from "./api";
@@ -24,15 +24,14 @@ function Empty({ children }) {
 
 export default function OperationsCenter({ session }) {
   const isAdmin = session?.roles?.includes("Account Admin");
-  const [state, setState] = useState({ loading: true, error: "", health: null, trust: null, reconciliation: null, audit: [], documents: [] });
+  const [state, setState] = useState({ loading: true, error: "", health: null, trust: null, reconciliation: null, audit: [] });
   const [reload, setReload] = useState(0);
-  const [reindexing, setReindexing] = useState(false);
 
   useEffect(() => {
     let active = true;
     setState((current) => ({ ...current, loading: true, error: "" }));
     const requests = [api.getHealthDetails(), api.getDataTrust(), api.getReconciliation()];
-    if (isAdmin) requests.push(api.getAuditEvents({ limit: 25 }), api.getAssistantDocumentIndex());
+    if (isAdmin) requests.push(api.getAuditEvents({ limit: 25 }));
     Promise.allSettled(requests).then((results) => {
       if (!active) return;
       const failures = results.filter((item) => item.status === "rejected");
@@ -43,21 +42,12 @@ export default function OperationsCenter({ session }) {
         trust: results[1]?.status === "fulfilled" ? results[1].value : null,
         reconciliation: results[2]?.status === "fulfilled" ? results[2].value : null,
         audit: results[3]?.status === "fulfilled" ? results[3].value : [],
-        documents: results[4]?.status === "fulfilled" ? results[4].value : [],
       });
     });
     return () => { active = false; };
   }, [isAdmin, reload]);
 
-  const reindex = async () => {
-    setReindexing(true);
-    try { await api.reindexAssistantDocuments(); setReload((value) => value + 1); }
-    catch (error) { setState((current) => ({ ...current, error: error.message || "Document reindexing failed." })); }
-    finally { setReindexing(false); }
-  };
-
   const failedChecks = state.reconciliation?.checks?.filter((item) => !item.passed) || [];
-  const indexed = state.documents.filter((item) => item.status === "INDEXED").length;
 
   return <section className="operations-center" aria-labelledby="operations-title">
     <header className="operations-heading">
@@ -102,11 +92,7 @@ export default function OperationsCenter({ session }) {
         <header><div><History /><span><b>Recent audit history</b><small>Last 25 successful mutations</small></span></div></header>
         <div className="audit-list">{state.audit.map((event) => <article key={event.id}><span><b>{titleCase(event.action)}</b><small>{event.actor_subject} · {event.entity_type || "workspace"}</small></span><time>{dateTime(event.occurred_at)}</time></article>)}{!state.loading && !state.audit.length && <Empty>No mutations have been audited yet.</Empty>}</div>
       </section>
-      <section className="trust-panel">
-        <header><div><Bot /><span><b>Assistant document index</b><small>{indexed}/{state.documents.length} documents indexed</small></span></div><button className="inline-action" onClick={reindex} disabled={reindexing}>{reindexing ? "Indexing…" : "Reindex"}</button></header>
-        <div className="audit-list">{state.documents.slice(0, 12).map((document) => <article key={document.document_id}><span><b>{document.title}</b><small>{document.file_name || "Linked document"}</small></span><StatusBadge value={(document.status || "unknown").toLowerCase()} /></article>)}{!state.loading && !state.documents.length && <Empty>No documents are currently indexed.</Empty>}</div>
-      </section>
     </div>}
-    {!isAdmin && <p className="admin-note"><ShieldCheck />Account Admins can also review mutation audit history and assistant indexing status.</p>}
+    {!isAdmin && <p className="admin-note"><ShieldCheck />Account Admins can also review mutation audit history.</p>}
   </section>;
 }

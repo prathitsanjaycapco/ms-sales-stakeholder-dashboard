@@ -1,7 +1,7 @@
 """Add the canonical resource demand through project deployment lifecycle.
 
 Revision ID: 0009_resourcing_lifecycle
-Revises: 0008_account_assistant
+Revises: 0007_weekly_executive_people
 """
 from alembic import op
 
@@ -12,7 +12,7 @@ from backend.resourcing_store import (
 )
 
 revision = "0009_resourcing_lifecycle"
-down_revision = "0008_account_assistant"
+down_revision = "0007_weekly_executive_people"
 branch_labels = None
 depends_on = None
 

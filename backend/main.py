@@ -42,9 +42,6 @@ from .models import (
     PodFocusUpdate,
     CriticalItemUpdate,
     CriticalItemCreate,
-    AssistantChatRequest,
-    AssistantChatResponse,
-    AssistantConversation,
     ResourceRequirementCreate,
     ResourceRequirementUpdate,
     CandidateCreate,
@@ -70,7 +67,6 @@ from .config import settings
 from .integrity import reconcile_account
 from .governance import READ_ROLES, execute_idempotent, principal_from_request, record_audit_event
 from .identity_service import IdentityService
-from .rag_service import AccountAssistantService
 from .resourcing_store import ResourcingStore
 
 
@@ -99,7 +95,6 @@ resourcing_store = ResourcingStore(
 )
 executive_store.resourcing_store = resourcing_store
 identity_service = IdentityService(pod_engine)
-assistant_service = AccountAssistantService(pod_engine, repository, pod_store, executive_store, settings)
 
 UPLOAD_ROOT = settings.upload_root
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
@@ -153,12 +148,7 @@ async def identity_permissions_and_audit(request: Request, call_next):
             return JSONResponse(status_code=403, content={"detail": "Pod access is not assigned", "code": "POD_SCOPE_REQUIRED"})
         if hasattr(repository, "refresh_if_stale"):
             repository.refresh_if_stale()
-        personal_assistant_action = (
-            request.method == "POST" and request.url.path == "/api/assistant/chat"
-        ) or (
-            request.method == "DELETE" and request.url.path.startswith("/api/assistant/conversations/")
-        )
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and not personal_assistant_action and not principal.can_write:
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and not principal.can_write:
             return JSONResponse(status_code=403, content={"detail": "This operation requires an Editor, Account Manager, or Account Admin role"})
         response = await call_next(request)
         if request.method not in {"GET", "HEAD", "OPTIONS"} and response.status_code < 400:
@@ -289,58 +279,6 @@ def health_details():
 @app.get("/api/session")
 def session(request: Request):
     return request.state.principal.as_dict()
-
-
-@app.get("/api/assistant/conversations", response_model=list[AssistantConversation])
-def assistant_conversations_list(request: Request, limit: int = Query(default=20, ge=1, le=50)):
-    if not request.state.principal.roles.intersection(READ_ROLES):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account read access is required")
-    return assistant_service.list_conversations(request.state.principal.subject, limit)
-
-
-@app.get("/api/assistant/conversations/{conversation_id}", response_model=AssistantConversation)
-def assistant_conversation_detail(conversation_id: str, request: Request):
-    if not request.state.principal.roles.intersection(READ_ROLES):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account read access is required")
-    try:
-        return assistant_service.get_conversation(conversation_id, request.state.principal.subject)
-    except Exception as error:
-        raise translate_domain_error(error) from error
-
-
-@app.delete("/api/assistant/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
-def assistant_conversation_delete(conversation_id: str, request: Request):
-    if not request.state.principal.roles.intersection(READ_ROLES):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account read access is required")
-    try:
-        assistant_service.delete_conversation(conversation_id, request.state.principal.subject)
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except Exception as error:
-        raise translate_domain_error(error) from error
-
-
-@app.post("/api/assistant/chat", response_model=AssistantChatResponse)
-def assistant_chat(payload: AssistantChatRequest, request: Request):
-    if not request.state.principal.roles.intersection(READ_ROLES):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account read access is required")
-    try:
-        return assistant_service.ask(payload, request.state.principal.subject, UPLOAD_ROOT)
-    except Exception as error:
-        raise translate_domain_error(error) from error
-
-
-@app.get("/api/assistant/document-index")
-def assistant_document_index(request: Request):
-    if not request.state.principal.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account Admin access is required")
-    return assistant_service.document_index_status()
-
-
-@app.post("/api/assistant/documents/reindex")
-def assistant_reindex_documents(request: Request):
-    if not request.state.principal.is_admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account Admin access is required")
-    return [assistant_service.index_document(document, UPLOAD_ROOT) for document in repository.documents.values()]
 
 
 @app.get("/api/employees")
@@ -1218,9 +1156,7 @@ def create_document(stakeholder_id: str, payload: DocumentLinkCreate):
     try:
         if payload.stored_name or payload.file_name or payload.file_size is not None:
             raise ValueError("Use the document upload endpoint to create a local file copy")
-        document = repository.create_document(stakeholder_id, payload)
-        assistant_service.index_document(document, UPLOAD_ROOT)
-        return document
+        return repository.create_document(stakeholder_id, payload)
     except Exception as error:
         raise translate_domain_error(error) from error
 
@@ -1253,9 +1189,7 @@ async def upload_stakeholder_document(
             owner_employee_id=owner_employee_id,
             tags=[value.strip() for value in tags.split(",") if value.strip()],
         )
-        document = repository.create_document(stakeholder_id, payload)
-        assistant_service.index_document(document, UPLOAD_ROOT)
-        return document
+        return repository.create_document(stakeholder_id, payload)
     except Exception as error:
         (UPLOAD_ROOT / stored_name).unlink(missing_ok=True)
         raise translate_domain_error(error) from error
@@ -1267,14 +1201,6 @@ def meeting_documents(meeting_id: str):
         if meeting_id not in repository.meetings and not pod_store.event_exists(meeting_id):
             raise NotFoundError("Meeting not found")
         return repository.list_meeting_documents(meeting_id)
-    except Exception as error:
-        raise translate_domain_error(error) from error
-
-
-@app.get("/api/meetings/{meeting_id}/brief")
-def meeting_brief(meeting_id: str):
-    try:
-        return pod_store.generate_meeting_brief(meeting_id)
     except Exception as error:
         raise translate_domain_error(error) from error
 
@@ -1309,9 +1235,7 @@ async def upload_meeting_document(
             owner_employee_id=owner_employee_id,
             tags=[value.strip() for value in tags.split(",") if value.strip()],
         )
-        document = repository.create_meeting_document(meeting_id, payload)
-        assistant_service.index_document(document, UPLOAD_ROOT)
-        return document
+        return repository.create_meeting_document(meeting_id, payload)
     except Exception as error:
         (UPLOAD_ROOT / stored_name).unlink(missing_ok=True)
         raise translate_domain_error(error) from error

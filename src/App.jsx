@@ -4,7 +4,7 @@ import {
   Crosshair, FileChartColumn, Filter, Flag, Flame, Focus, Grid2X2,
   Download, ExternalLink, FileText, Hand, Layers3, List, Map as MapIcon, Maximize2, Menu, MousePointer2, Network,
   NotebookPen, Pencil, Plus, RotateCcw, Search, Settings, ShieldCheck,
-  Sparkles, Tag, Trash2, UserRound, UsersRound, X, ZoomIn, ZoomOut,
+  Tag, Trash2, UserRound, UsersRound, X, ZoomIn, ZoomOut,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
 } from "lucide-react";
 import { api } from "./api";
@@ -13,7 +13,6 @@ import { formatBackendDate } from "./dateUtils";
 import DataManagement from "./DataManagement";
 import PodView from "./PodView";
 import ExecutiveView from "./ExecutiveView";
-import AccountAssistant from "./AccountAssistant";
 import ResourcingView from "./ResourcingView";
 import SearchableSelect from "./SearchableSelect";
 import OperationsCenter from "./OperationsCenter";
@@ -947,13 +946,6 @@ function App() {
     initialStakeholderHandled.current = true;
     if (row) select(row.person, row, { focus: true });
   }, [mapState, rows, route.stakeholder]);
-  const assistantEntity = accountDetail
-    ? { type: accountDetail.type, id: accountDetail.data?.id || accountDetail.data?.engagement?.id || null }
-    : isManageData && dataFocus
-      ? { type: dataFocus.type, id: dataFocus.id }
-      : topSection === "Stakeholder Map" && selected
-        ? { type: "stakeholder", id: selected.person.id }
-        : { type: null, id: null };
   return (
     <div className={`app-shell ${leftCollapsed || !showMapChrome ? "left-collapsed" : ""} ${rightCollapsed || !showMapChrome ? "right-collapsed" : ""} ${isFullWidth ? "pod-shell" : ""} ${showMapChrome ? "map-section" : ""} ${topSection === "Settings" ? "settings-section" : ""} ${preferences.compactTooltips ? "compact-tooltips" : "expanded-tooltips"}`}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
@@ -1015,15 +1007,6 @@ function App() {
         onResourcing={openResourcing}
       />}
       {accountDetailError && <div className="pod-toast error-state" role="alert"><AlertTriangle />{accountDetailError}<button onClick={() => setAccountDetailError("")} aria-label="Dismiss error"><X /></button></div>}
-      <AccountAssistant
-        context={{
-          pod,
-          section: topSection,
-          entity_type: assistantEntity.type,
-          entity_id: assistantEntity.id,
-        }}
-        onNavigate={(navigation) => { setAccountDetail(null); openSearchResult(navigation); }}
-      />
     </div>
   );
 }

@@ -53,15 +53,6 @@ export const api = {
     const query = new URLSearchParams(Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== ""));
     return request(`/audit-events${query.size ? `?${query}` : ""}`);
   },
-  getAssistantDocumentIndex: () => request("/assistant/document-index"),
-  reindexAssistantDocuments: () => request("/assistant/documents/reindex", { method: "POST" }),
-  getAssistantConversations: () => request("/assistant/conversations"),
-  getAssistantConversation: (id) => request(`/assistant/conversations/${encodeURIComponent(id)}`),
-  deleteAssistantConversation: (id) => request(`/assistant/conversations/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  askAssistant: (message, conversationId, context = {}) => request("/assistant/chat", {
-    method: "POST",
-    body: JSON.stringify({ message, conversation_id: conversationId || null, context }),
-  }),
   getPods: () => request("/pods"),
   search: (query, pod = "All") => request(`/search?${new URLSearchParams({ q: query, ...(pod && pod !== "All" ? { pod } : {}) })}`),
   getMap: (pod, params = {}) => {
@@ -135,7 +126,6 @@ export const api = {
   createDocument: (stakeholderId, payload) => request(`/stakeholders/${stakeholderId}/documents`, { method: "POST", body: JSON.stringify(payload) }),
   uploadStakeholderDocument: (stakeholderId, file, metadata) => upload(`/stakeholders/${stakeholderId}/documents/upload`, file, metadata),
   getMeetingDocuments: (meetingId) => request(`/meetings/${meetingId}/documents`),
-  getMeetingBrief: (meetingId) => request(`/meetings/${meetingId}/brief`),
   getMeeting: (meetingId) => request(`/meetings/${meetingId}`),
   uploadMeetingDocument: (meetingId, file, metadata) => upload(`/meetings/${meetingId}/documents/upload`, file, metadata),
   documentDownloadUrl: (documentId) => `${API_BASE}/documents/${documentId}/download`,

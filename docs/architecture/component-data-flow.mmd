@@ -7,14 +7,12 @@ flowchart TB
         executiveui["Executive analytics<br/>exports"]
         resourcingui["Resourcing<br/>onboarding"]
         trustui["Data management<br/>Trust & operations"]
-        assistantui["Account assistant<br/>citations"]
         apiClient["Shared browser API client"]
         stakeholder --> apiClient
         podui --> apiClient
         executiveui --> apiClient
         resourcingui --> apiClient
         trustui --> apiClient
-        assistantui --> apiClient
     end
 
     nginx["Nginx web container<br/><code>/api</code> reverse proxy"]
@@ -32,7 +30,6 @@ flowchart TB
             executivestore["Executive analytics store<br/>revenue · delivery · capacity"]
             resourcingstore["Resourcing store<br/>requirements · candidates · onboarding"]
             reconciliation["Integrity and trust<br/>cross-domain lineage checks"]
-            assistant["Grounded assistant service<br/>retrieve across canonical domains<br/>index · cite · answer"]
         end
 
         orm["Shared SQLAlchemy engine and transactions"]
@@ -43,14 +40,12 @@ flowchart TB
         routes --> executivestore
         routes --> resourcingstore
         routes --> reconciliation
-        routes --> assistant
         identity --> orm
         repository --> orm
         podstore --> orm
         executivestore --> orm
         resourcingstore --> orm
         reconciliation -->|"cross-domain reads"| orm
-        assistant -->|"grounded retrieval and persistence"| orm
     end
 
     subgraph postgres["Canonical PostgreSQL authority"]
@@ -58,11 +53,10 @@ flowchart TB
         accountdata[("Account graph<br/>stakeholders · meetings<br/>notes · opportunities")]
         operatingdata[("Pod and executive<br/>engagements · revenue<br/>milestones · demand")]
         peopledata[("People and resourcing<br/>employees · capacity<br/>candidates · onboarding")]
-        trustdata[("Trust and assistant<br/>audit · idempotency<br/>chunks · conversations")]
+        trustdata[("Trust controls<br/>audit · idempotency")]
     end
 
     privatefiles[("Durable private storage<br/>original uploaded files")]
-    openai["Approved OpenAI Responses API<br/>optional"]
 
     apiClient -->|"JSON and file requests"| nginx
     nginx --> middleware
@@ -71,22 +65,16 @@ flowchart TB
     orm --> peopledata
     orm --> trustdata
     routes -->|"validated upload / download"| privatefiles
-    privatefiles -->|"extract supported text"| assistant
-    assistant -->|"grounded answer"| routes
-    assistant -. "approved retrieved excerpts only" .-> openai
-    openai -. "model-generated answer" .-> assistant
 
     classDef ui fill:#EAF2FF,stroke:#175CD3,color:#102A56,stroke-width:2px;
     classDef boundary fill:#FFF4E5,stroke:#B54708,color:#7A2E0E,stroke-width:2px;
     classDef service fill:#E8F7F0,stroke:#067647,color:#064E3B,stroke-width:2px;
     classDef data fill:#F4EBFF,stroke:#7F56D9,color:#3E1C78,stroke-width:2px;
-    classDef optional fill:#FFF1F3,stroke:#C01048,color:#7A102F,stroke-width:2px;
 
-    class stakeholder,podui,executiveui,resourcingui,trustui,assistantui,apiClient ui;
+    class stakeholder,podui,executiveui,resourcingui,trustui,apiClient ui;
     class nginx,middleware,routes boundary;
-    class identity,repository,podstore,executivestore,resourcingstore,reconciliation,assistant,orm service;
+    class identity,repository,podstore,executivestore,resourcingstore,reconciliation,orm service;
     class accountdata,operatingdata,peopledata,trustdata,privatefiles data;
-    class openai optional;
     style frontend fill:#F8FAFC,stroke:#175CD3,stroke-width:2px
     style backend fill:#F8FAFC,stroke:#067647,stroke-width:2px
     style services fill:#F2FBF7,stroke:#067647,stroke-width:1px

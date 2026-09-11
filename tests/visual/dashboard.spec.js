@@ -118,7 +118,7 @@ test("stakeholder map renders the full business hierarchy and only primary techn
   await expect(page).toHaveScreenshot("stakeholders-zoomed-out-desktop.png", { fullPage: false });
 });
 
-test("pod-head Team drawer and account assistant remain usable", async ({ page }) => {
+test("pod-head Team drawer remains usable", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/?section=stakeholders&pod=ISG", { waitUntil: "networkidle" });
   await page.getByRole("button", { name: "Open Dan Simkowitz" }).click();
@@ -126,11 +126,6 @@ test("pod-head Team drawer and account assistant remain usable", async ({ page }
   await expect(page.getByText("Top of pod hierarchy")).toBeVisible();
   await expect(page.locator(".team-tab .report-list")).toBeVisible();
   await page.getByRole("button", { name: "Collapse stakeholder drawer" }).click();
-
-  const launcher = page.getByRole("button", { name: "Ask the Morgan Stanley account assistant" });
-  await launcher.click();
-  await expect(page.getByRole("dialog", { name: "Morgan Stanley account assistant" })).toBeVisible();
-  await expect(launcher).toBeVisible();
 });
 
 test("stakeholder map keeps nodes clamped, unique, legible, and connector-aligned", async ({ page }) => {
@@ -247,8 +242,6 @@ test("phone resource requirement modal stays above persistent UI", async ({ page
   const modal = page.getByRole("dialog", { name: "Create resource requirement" });
   await expect(modal).toBeVisible();
   await expect(modal).toBeInViewport();
-  await expect(page.locator(".account-assistant")).not.toBeVisible();
-  await expect(page.locator(".assistant-launcher")).not.toBeVisible();
   await expectNoPageOverflow(page);
   await expect(page).toHaveScreenshot("resourcing-role-modal-phone.png", { fullPage: false });
 });

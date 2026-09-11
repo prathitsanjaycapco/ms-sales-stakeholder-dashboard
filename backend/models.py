@@ -291,56 +291,6 @@ class DocumentLinkUpdate(BaseModel):
         return value
 
 
-class AssistantContext(BaseModel):
-    pod: Optional[str] = Field(default=None, max_length=120)
-    section: Optional[str] = Field(default=None, max_length=120)
-    entity_type: Optional[str] = Field(default=None, max_length=80)
-    entity_id: Optional[str] = Field(default=None, max_length=180)
-
-
-class AssistantChatRequest(BaseModel):
-    message: str = Field(min_length=2, max_length=4000)
-    conversation_id: Optional[str] = Field(default=None, max_length=180)
-    context: AssistantContext = Field(default_factory=AssistantContext)
-
-
-class AssistantCitation(BaseModel):
-    id: str
-    source_type: str
-    source_id: str
-    title: str
-    excerpt: str
-    pod: Optional[str] = None
-    url: Optional[str] = None
-    navigation: dict = Field(default_factory=dict)
-
-
-class AssistantMessage(BaseModel):
-    id: str
-    role: Literal["user", "assistant"]
-    content: str
-    citations: list[AssistantCitation] = Field(default_factory=list)
-    provider: Optional[str] = None
-    created_at: datetime
-
-
-class AssistantConversation(BaseModel):
-    id: str
-    title: str
-    context_pod: Optional[str] = None
-    context_section: Optional[str] = None
-    created_at: datetime
-    updated_at: datetime
-    messages: list[AssistantMessage] = Field(default_factory=list)
-
-
-class AssistantChatResponse(BaseModel):
-    conversation_id: str
-    message: AssistantMessage
-    grounded: bool = True
-    retrieval_count: int = Field(ge=0)
-
-
 class CriticalItemCreate(BaseModel):
     title: str = Field(min_length=2, max_length=240)
     description: str = Field(default="", max_length=4000)

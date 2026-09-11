@@ -12,13 +12,12 @@ flowchart LR
 
     subgraph governed["Governed data boundary"]
         direction TB
-        postgres[("Canonical PostgreSQL<br/>account · pod · executive<br/>resourcing · assistant · audit")]
+        postgres[("Canonical PostgreSQL<br/>account · pod · executive<br/>resourcing · audit")]
         documents[("Durable private document storage<br/>uploaded source files")]
     end
 
     sourcefiles["Governed source files<br/>executive and account feeds"]
     jobs["Release and import jobs<br/>Alembic migrations<br/>validated idempotent imports"]
-    openai["Approved OpenAI Responses API<br/>optional model generation<br/>response storage disabled"]
     operations["Platform operations<br/>structured logs · metrics · alerts<br/>backup and restore"]
     scanner["Malware scanning and retention<br/>deployment-owned controls"]
 
@@ -28,8 +27,6 @@ flowchart LR
     api -->|"upload and download"| documents
     sourcefiles -->|"validated inputs"| jobs
     jobs -->|"migrate and upsert"| postgres
-    api -. "approved retrieved excerpts only" .-> openai
-    openai -. "grounded response" .-> api
     operations -. "observe" .-> runtime
     operations -. "back up together" .-> governed
     scanner -. "scan and enforce policy" .-> documents
@@ -38,15 +35,12 @@ flowchart LR
     classDef edge fill:#EAF2FF,stroke:#175CD3,color:#102A56,stroke-width:2px;
     classDef app fill:#E8F7F0,stroke:#067647,color:#064E3B,stroke-width:2px;
     classDef data fill:#F4EBFF,stroke:#7F56D9,color:#3E1C78,stroke-width:2px;
-    classDef optional fill:#FFF1F3,stroke:#C01048,color:#7A102F,stroke-width:2px;
     classDef ops fill:#F2F4F7,stroke:#475467,color:#101828,stroke-width:2px;
 
     class users actor;
     class gateway edge;
     class web,api,jobs app;
     class postgres,documents,sourcefiles data;
-    class openai optional;
     class operations,scanner ops;
     style runtime fill:#F8FAFC,stroke:#667085,stroke-width:2px
     style governed fill:#FCFAFF,stroke:#7F56D9,stroke-width:2px
-

@@ -45,18 +45,14 @@ describe("shared dashboard visual system", () => {
     expect(desktopReadability).not.toMatch(/font-size:\s*[5-9](?:\.\d+)?px/);
   });
 
-  it("normalizes drawers, dialogs, and the account assistant", () => {
+  it("normalizes drawers and dialogs", () => {
     expect(css).toContain(".stakeholder-drawer,.pod-detail,.exec-detail-drawer,.weekly-detail-drawer");
-    expect(css).toContain(".pod-modal,.modal,.entity-detail-dialog,.account-assistant,.global-search-dialog");
-    expect(css).toContain(".assistant-context,.assistant-history-control>button");
   });
 
-  it("provides responsive navigation, contextual map panels, and collision-safe launchers", () => {
+  it("provides responsive navigation and contextual map panels", () => {
     expect(css).toContain(".mobile-nav-trigger,.mobile-nav-backdrop,.map-panel-backdrop");
     expect(css).toContain(".top-navigation nav.open");
     expect(css).toContain(".advanced-filter-toggle");
-    expect(css).toContain(".map-section .assistant-launcher");
-    expect(css).toContain(".settings-section .assistant-launcher");
   });
 
   it("keeps the executive scale in the shared cascade with readable operational text", () => {

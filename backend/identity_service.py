@@ -275,7 +275,6 @@ class IdentityService:
                 "identity": "trusted_proxy" if settings.auth_mode == "trusted_proxy" else "development",
                 "repository": getattr(self.engine, "name", "database"),
                 "document_storage": "durable" if settings.document_storage_durable else "local_only",
-                "assistant_provider": settings.ai_provider,
                 "outbound_notifications": "not_configured",
             },
         }
