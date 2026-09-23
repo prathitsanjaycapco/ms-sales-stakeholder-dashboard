@@ -6,9 +6,9 @@ Revises: None
 from alembic import op
 from sqlalchemy import MetaData, inspect
 
-from backend.canonical_schema import metadata as canonical_metadata
-from backend.executive_store import executive_metadata
-from backend.pod_store import pod_metadata
+from app.canonical_schema import metadata as canonical_metadata
+from app.executive_store import executive_metadata
+from app.pod_store import pod_metadata
 
 
 revision = "0001_canonical_account_model"

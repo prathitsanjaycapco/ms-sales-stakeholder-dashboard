@@ -8,14 +8,14 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-from backend.canonical_schema import (
+from app.canonical_schema import (
     audit_events,
     meeting_employees,
     meeting_opportunities,
     opportunity_employees,
     stakeholder_employee_relationships,
 )
-from backend.executive_store import engagement_stakeholders
+from app.executive_store import engagement_stakeholders
 
 
 revision = "0005_identity_audit"

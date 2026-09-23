@@ -1,0 +1,70 @@
+%%{init: {"theme": "base", "flowchart": {"curve": "basis", "htmlLabels": true, "nodeSpacing": 38, "rankSpacing": 56}, "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "15px", "primaryTextColor": "#101828", "lineColor": "#344054", "clusterBkg": "#F8FAFC", "clusterBorder": "#667085"}}}%%
+flowchart TB
+    users["Internal account users"]
+    identity["Corporate identity gateway<br/>SSO and scoped trusted identity headers"]
+    waf["AWS WAFv2<br/>managed rules and rate limits"]
+
+    subgraph aws["AWS account and Region"]
+        direction TB
+        alb["Application Load Balancer<br/>HTTPS via ACM<br/>restricted ingress"]
+
+        subgraph vpc["VPC across at least two Availability Zones"]
+            direction TB
+            subgraph private["Private application subnets"]
+                direction LR
+                web["ECS/Fargate web service<br/>Nginx and React SPA<br/>2 small tasks"]
+                api["ECS/Fargate API service<br/>FastAPI and SQLAlchemy<br/>2+ tasks"]
+                migration["One-off ECS migration task<br/>Alembic upgrade head"]
+            end
+            rds[("Amazon RDS for PostgreSQL<br/>Multi-AZ DB instance<br/>canonical data and audit")]
+            efs[("Amazon EFS<br/>encrypted shared filesystem<br/>document uploads")]
+            endpoints["VPC endpoints<br/>ECR, Logs, Secrets Manager"]
+        end
+
+        ecr["Amazon ECR<br/>immutable scanned images"]
+        secrets["Secrets Manager<br/>DB URL and proxy secret"]
+        logs["CloudWatch Logs, metrics, alarms"]
+        backup["RDS and EFS backup<br/>restore testing"]
+    end
+
+    pipeline["CI/CD using OIDC<br/>build, test, publish, deploy"]
+    operations["Platform operations<br/>monitor, reconcile, respond"]
+
+    users -->|"HTTPS"| identity
+    identity -->|"authenticated traffic"| waf
+    waf --> alb
+    alb -->|"/"| web
+    alb -->|"/api/*"| api
+    api -->|"SQL transactions"| rds
+    api -->|"read and write files"| efs
+    migration -->|"schema migration"| rds
+    api -. "runtime secrets" .-> secrets
+    migration -. "runtime secrets" .-> secrets
+    api -. "logs and metrics" .-> logs
+    web -. "logs" .-> logs
+    rds -. "back up" .-> backup
+    efs -. "back up" .-> backup
+    pipeline -->|"publish images"| ecr
+    ecr -->|"pull image"| web
+    ecr -->|"pull image"| api
+    ecr -->|"pull image"| migration
+    endpoints --- ecr
+    endpoints --- secrets
+    endpoints --- logs
+    operations -. "observe and release-gate" .-> logs
+    operations -. "validate reconciliation" .-> api
+
+    classDef actor fill:#FFF4E5,stroke:#B54708,color:#7A2E0E,stroke-width:2px;
+    classDef edge fill:#EAF2FF,stroke:#175CD3,color:#102A56,stroke-width:2px;
+    classDef compute fill:#E8F7F0,stroke:#067647,color:#064E3B,stroke-width:2px;
+    classDef data fill:#F4EBFF,stroke:#7F56D9,color:#3E1C78,stroke-width:2px;
+    classDef ops fill:#F2F4F7,stroke:#475467,color:#101828,stroke-width:2px;
+
+    class users,pipeline,operations actor;
+    class identity,waf,alb edge;
+    class web,api,migration compute;
+    class rds,efs data;
+    class ecr,secrets,logs,backup,endpoints ops;
+    style aws fill:#F8FAFC,stroke:#667085,stroke-width:2px
+    style vpc fill:#FCFCFD,stroke:#98A2B3,stroke-width:2px
+    style private fill:#F2FBF7,stroke:#067647,stroke-width:1px

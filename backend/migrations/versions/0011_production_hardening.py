@@ -7,7 +7,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
 
-from backend.canonical_schema import idempotency_records
+from app.canonical_schema import idempotency_records
 
 
 revision = "0011_production_hardening"

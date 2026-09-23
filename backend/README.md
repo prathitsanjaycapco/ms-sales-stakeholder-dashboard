@@ -27,14 +27,15 @@ Pod operating records and Executive analytics reference the same stakeholder, me
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install -r backend\requirements.txt
-python -m alembic -c alembic.ini upgrade head
-python -m uvicorn backend.main:app --reload --port 8000
+python -m pip install -r requirements.txt
+Copy-Item .env.example .env
+python -m alembic upgrade head
+python -m uvicorn app.main:app --reload --port 8000
 ```
 
-Development defaults to `backend/stakeholder-dev.db` only when `DATABASE_URL` is absent. Startup never seeds business data. Run `python -m backend.manage seed-demo` explicitly for a disposable nonproduction dataset; production configuration rejects that command.
+Development defaults to `app/stakeholder-dev.db` only when `DATABASE_URL` is absent. Startup never seeds business data. Run `python -m app.manage seed-demo` explicitly for a disposable nonproduction dataset; production configuration rejects that command.
 
-The backend loads the workspace-root `.env` itself; VS Code terminal environment injection is not required. `.env` is gitignored. URL-encode special characters in database passwords.
+The backend loads its repository-root `.env` itself; VS Code terminal environment injection is not required. `.env` is gitignored. URL-encode special characters in database passwords.
 
 ## Production configuration
 
@@ -64,9 +65,9 @@ The trusted identity proxy must remove client-supplied identity headers and set 
 Alembic is the only supported schema deployment mechanism:
 
 ```powershell
-python -m alembic -c alembic.ini upgrade head
-python -m alembic -c alembic.ini current
-python -m alembic -c alembic.ini check
+python -m alembic upgrade head
+python -m alembic current
+python -m alembic check
 ```
 
 `schema.sql` was removed because it used UUID columns that were incompatible with the application's governed string identifiers and could create a second, disconnected schema.
@@ -74,8 +75,8 @@ python -m alembic -c alembic.ini check
 For a database created by the earlier snapshot prototype, import before upgrading:
 
 ```powershell
-python -m backend.manage import-legacy
-python -m alembic -c alembic.ini upgrade head
+python -m app.manage import-legacy
+python -m alembic upgrade head
 ```
 
 The cleanup migration refuses to remove the legacy snapshot unless canonical stakeholder rows exist.
@@ -91,22 +92,22 @@ The cleanup migration refuses to remove the legacy snapshot unless canonical sta
 
 Definitions and inputs are returned in Executive and Pod responses. Recommendations are deterministic findings with supporting metrics, source periods, related entity IDs, suggested actions, and confidence statements.
 
-Executive delivery, revenue, milestone, capacity, and allocation feeds use the governed, idempotent upsert described in [`docs/EXECUTIVE_IMPORT.md`](../docs/EXECUTIVE_IMPORT.md). Validate with `import-executive --dry-run` before writing; the engagement feed records source identity and synchronization evidence used by the Trust & operations screen.
+Executive delivery, revenue, milestone, capacity, and allocation feeds use the governed, idempotent upsert described in [`docs/EXECUTIVE_IMPORT.md`](docs/EXECUTIVE_IMPORT.md). Validate with `import-executive --dry-run` before writing; the engagement feed records source identity and synchronization evidence used by the Trust & operations screen.
 
 ## Validation
 
 Run all backend checks:
 
 ```powershell
-python -m unittest discover -s backend -p "test_*.py" -v
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
 With `DATABASE_URL` pointing to PostgreSQL, also run the database-specific
 constraint and migration-head checks:
 
 ```powershell
-python -m unittest backend.test_postgresql_integration -v
-python -m alembic -c alembic.ini check
+python -m unittest tests.test_postgresql_integration -v
+python -m alembic check
 ```
 
 Run a cross-screen reconciliation against the configured database:

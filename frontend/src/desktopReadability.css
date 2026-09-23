@@ -1,0 +1,802 @@
+/*
+ * Wide-desktop readability layer.
+ *
+ * The product intentionally has a compact, high-information visual language.
+ * On large desktop canvases we can spend a little more of that space on type
+ * without changing the hierarchy or the character of the interface.
+ */
+
+@media (min-width: 1600px) {
+  :root {
+    --ui-font-xs: 12px;
+    --ui-font-sm: 13px;
+    --ui-font-md: 14px;
+    --ui-font-lg: 17px;
+    --ui-font-xl: 26px;
+    --ui-control-sm: 36px;
+    --ui-control: 40px;
+    --ui-content: 2048px;
+    --ui-data-content: 1560px;
+    --ui-muted: #607687;
+    --visual-muted: #526b7c;
+    --visual-subtle: #667d8d;
+  }
+
+  body {
+    font-size: 13px;
+  }
+
+  .app-shell {
+    width: 100%;
+    overflow: hidden;
+  }
+
+  /* Shared shell and page hierarchy. */
+  .top-navigation nav button,
+  .global-actions label,
+  .global-actions select {
+    font-size: 12px;
+  }
+
+  .workspace-eyebrow,
+  .pod-view-head > div:first-child > span,
+  .data-management-head > div:first-child > span,
+  .weekly-hero-copy > span,
+  .resourcing-view .res-hero > div:first-child > span {
+    font-size: 12px;
+  }
+
+  .workspace-header p,
+  .pod-view-head p,
+  .data-management-head p,
+  .weekly-hero-copy p,
+  .resourcing-view .res-hero p,
+  .secondary-view > p {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .workspace-actions > button,
+  .workspace-header .global-search input,
+  .pod-view button,
+  .pod-view input,
+  .pod-view select,
+  .executive-weekly-view button,
+  .executive-weekly-view input,
+  .executive-weekly-view select,
+  .resourcing-view button,
+  .resourcing-view input,
+  .resourcing-view select,
+  .resourcing-view textarea,
+  .data-management button,
+  .data-management input,
+  .data-management select,
+  .data-management textarea,
+  .secondary-view button,
+  .secondary-view input,
+  .secondary-view select,
+  .settings-view button,
+  .settings-view select {
+    font-size: 13px !important;
+  }
+
+  /* Secondary copy remains visually quieter, but never microscopic. */
+  .pod-view :is(small, em, time, dt),
+  .executive-weekly-view :is(small, em, time, dt),
+  .resourcing-view :is(small, em, time, dt, th),
+  .data-management :is(small, em, time, dt, th),
+  .secondary-view :is(small, em, time, dt, th),
+  .settings-view :is(small, em, time, dt),
+  .stakeholder-drawer :is(small, em, time, dt),
+  .pod-detail :is(small, em, time, dt),
+  .exec-detail-drawer :is(small, em, time, dt),
+  .weekly-detail-drawer :is(small, em, time, dt),
+  .res-drawer :is(small, em, time, dt),
+  .modal :is(small, em, time, dt),
+  .entity-detail-dialog :is(small, em, time, dt),
+  .account-assistant :is(small, em, time) {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+
+  .pod-view p,
+  .executive-weekly-view p,
+  .resourcing-view p,
+  .data-management p,
+  .secondary-view p,
+  .settings-view p,
+  .stakeholder-drawer p,
+  .pod-detail p,
+  .exec-detail-drawer p,
+  .weekly-detail-drawer p,
+  .res-drawer p,
+  .modal p,
+  .entity-detail-dialog p,
+  .account-assistant p {
+    font-size: 13px !important;
+    line-height: 1.5 !important;
+  }
+
+  /* Navigation rail and stakeholder map. */
+  .rail-label,
+  .rail-filter,
+  .rail-filter select,
+  .clear-filters,
+  .legend-section,
+  .legend-section small,
+  .canvas-toolbar > span,
+  .canvas-hint,
+  .reporting-forest-heading span,
+  .reporting-forest-heading strong,
+  .map-completeness strong,
+  .map-integrity-warning,
+  .organization-group > header small,
+  .reporting-root-heading strong,
+  .reporting-root-heading span,
+  .reporting-root-heading > small,
+  .division-title,
+  .unit-heading > span,
+  .unit-heading em,
+  .primary-eyebrow,
+  .team-count,
+  .technology-primary > small,
+  .enterprise-title,
+  .enterprise-grid h3,
+  .unknown-reporting > span {
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .empty-team-note,
+  .division-head-vacancy {
+    min-height: 28px;
+    padding: 6px 8px;
+    font-size: 12px !important;
+    line-height: 1.35;
+  }
+
+  .legend-capco,
+  .node-avatar,
+  .unit-heading strong,
+  .enterprise-grid strong,
+  .enterprise-grid small {
+    font-size: 12px !important;
+    line-height: 1.3;
+  }
+
+  .legend-capco {
+    width: 18px !important;
+    height: 18px !important;
+  }
+
+  .view-button,
+  .rail-add,
+  .pod-select {
+    font-size: 13px;
+  }
+
+  .stakeholder-node {
+    width: 104px;
+    min-height: 62px;
+  }
+
+  .stakeholder-node.technology {
+    width: 126px;
+  }
+
+  .stakeholder-node.division-head {
+    width: 190px;
+    min-height: 50px;
+  }
+
+  .stakeholder-node.enterprise-lead,
+  .enterprise-lead-box .stakeholder-node.enterprise-lead {
+    width: 184px;
+  }
+
+  .enterprise-report .stakeholder-node {
+    width: 108px;
+  }
+
+  .node-copy {
+    margin-top: 5px;
+    line-height: 1.25;
+  }
+
+  .node-copy strong,
+  .stakeholder-node.technology .node-copy strong {
+    font-size: 12px;
+  }
+
+  .node-copy small,
+  .stakeholder-node.division-head::before,
+  .stakeholder-node sup,
+  .buyer-badge,
+  .drawer-tags span,
+  .drawer-tabs button,
+  .drawer-tab-content,
+  .drawer-tab-content h4,
+  .section-title,
+  .section-title button,
+  .profile-fields,
+  .activity,
+  .team-tab label,
+  .report-list b,
+  .report-list small,
+  .opportunity b,
+  .opportunity span,
+  .person-tooltip {
+    font-size: 12px;
+  }
+
+  .person-tooltip {
+    width: 270px;
+    line-height: 1.45;
+  }
+
+  /* Dense cards, calendars, tables, pills, and record rows. */
+  .pod-card :is(small, em, p, dt),
+  .weekly-card :is(small, em, p, dt),
+  .data-guidance :is(small, p),
+  .resourcing-view.resourcing-view :is(small, em, time, p, label, button, input, select, th, td),
+  .res-drawer.res-drawer :is(small, em, time, p, label, button, input, select, dt, dd) {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+
+  .pod-card :is(button, label, input, select),
+  .weekly-card :is(button, label, input, select),
+  .data-entry-card :is(button, label, input, select, textarea),
+  .settings-card :is(button, label, input, select) {
+    font-size: 13px !important;
+  }
+
+  .pod-card :is(b, strong),
+  .weekly-card :is(b, strong, dd),
+  .res-card h2,
+  .res-role-main h3,
+  .res-kanban strong,
+  .res-onboarding-card h3,
+  .data-record-list b,
+  .master-table-wrap td,
+  .list-table > div,
+  .list-table > button {
+    font-size: 13px;
+  }
+
+  .pod-card h2,
+  .weekly-section-heading h2,
+  .data-form-title h2,
+  .master-register h2 {
+    font-size: 16px;
+  }
+
+  .pod-card .calendar-event :is(b, strong, span, small, i),
+  .week-hours,
+  .day-head b,
+  .day-head > small,
+  .weekly-range-control small,
+  .weekly-range-control .this-week,
+  .weekly-view-toggle button,
+  .weekly-pod-filter button,
+  .weekly-segmented button,
+  .weekly-activity-chip,
+  .weekly-activity-chip > span,
+  .weekly-card .weekly-calendar-day button :is(small, span),
+  .resourcing-view :is(.res-tabs button, .res-card > header span, .res-card > header > small, .res-status, .res-role-main > span),
+  .res-skill-list i,
+  .res-match,
+  .res-kanban footer,
+  .res-progress-label,
+  .step-icon,
+  .res-quick-filters button,
+  .master-table-wrap th,
+  .master-table-wrap code,
+  .master-status,
+  .data-record-list article > span,
+  .pod-resourcing-link small,
+  .pod-resourcing-link > span:last-child,
+  .executive-staffing-snapshot small,
+  .executive-staffing-snapshot .staffing-open,
+  .res-candidate-archive :is(span, small, b) {
+    font-size: 12px !important;
+    line-height: 1.35 !important;
+  }
+
+  /* Explicitly reconcile older high-specificity compact declarations. */
+  .executive-command-view.executive-command-view :is(p, small, em, time, dt) {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+
+  .executive-command-view.executive-command-view .weekly-hero-copy p {
+    font-size: 13px !important;
+  }
+
+  .executive-command-view.executive-command-view :is(button, input, select) {
+    font-size: 12px !important;
+  }
+
+  .account-head-kpis :is(small, span),
+  .executive-staffing-snapshot small,
+  .executive-staffing-snapshot .staffing-open,
+  .executive-compact-card .weekly-section-heading :is(span, p),
+  .portfolio-health-legend :is(button, b, small),
+  .pod-exposure-list :is(b, small, strong),
+  .confidence-ring small,
+  .commercial-confidence :is(dt, dd),
+  .commercial-decision-list :is(small, b, strong),
+  .capacity-summary span,
+  .capacity-pressure-list button > span:first-child,
+  .capacity-pressure-list :is(b, small, strong),
+  .leadership-agenda-list :is(b, small),
+  .agenda-severity,
+  .strategic-portfolio-list :is(b, small, strong),
+  .horizon-signal-list :is(b, small),
+  .compact-empty,
+  .executive-command-content .weekly-lineage :is(span, b) {
+    font-size: 12px !important;
+    line-height: 1.4;
+  }
+
+  .account-head-kpis b,
+  .confidence-ring b {
+    font-size: 22px !important;
+  }
+
+  .capacity-summary b {
+    font-size: 18px !important;
+  }
+
+  .pod-view.pod-view :is(p, small, em, time, dt) {
+    font-size: 12px !important;
+    line-height: 1.45 !important;
+  }
+
+  .pod-view.pod-view :is(button, input, select) {
+    font-size: 12px !important;
+  }
+
+  .pod-view .data-status,
+  .pod-view .pod-tag-filter > span,
+  .staffing-summary-title b,
+  .staffing-summary-action,
+  .pod-priority-bar :is(b, span),
+  .day-head :is(b, span, small),
+  .pod-empty span,
+  .section-count {
+    font-size: 12px !important;
+    line-height: 1.4;
+  }
+
+  .resourcing-view .res-hero-context strong,
+  .overview-mini-summary > span,
+  .overview-role-list :is(b, small),
+  .overview-candidate-stages span,
+  .res-overview-onboarding :is(th, td, b, small),
+  .res-onboarding-next > span,
+  .res-onboarding-next > strong,
+  .res-critical-pulse :is(small, em) {
+    font-size: 12px !important;
+    line-height: 1.4;
+  }
+
+  .data-management .database-chip b {
+    font-size: 12px !important;
+  }
+
+  .resourcing-view .res-pulse > button,
+  .resourcing-view .res-secondary-metrics article,
+  .weekly-pulse-card,
+  .account-head-kpis article {
+    min-height: 96px;
+  }
+
+  .res-role-card {
+    min-height: 124px;
+  }
+
+  .res-kanban > article > div > button {
+    min-height: 148px;
+  }
+
+  .res-onboarding-card,
+  .weekly-person-row,
+  .weekly-project-row,
+  .data-record-list article,
+  .list-table > div,
+  .list-table > button {
+    line-height: 1.4;
+  }
+
+  .res-onboarding-table th,
+  .res-onboarding-table td,
+  .master-table-wrap th,
+  .master-table-wrap td {
+    height: auto;
+    min-height: 48px;
+    padding: 10px 8px;
+    line-height: 1.35;
+  }
+
+  /* Dialogs and assistant use the same readable desktop rhythm. */
+  .drawer-profile h2,
+  .res-drawer > header h2,
+  .entity-detail-head h2 {
+    line-height: 1.2;
+  }
+
+  .drawer-tab-content,
+  .drawer-content,
+  .pod-detail,
+  .exec-drawer-body,
+  .weekly-drawer-content,
+  .res-drawer > div,
+  .entity-detail-body,
+  .account-assistant {
+    color: var(--ui-text);
+  }
+
+  .assistant-message-label,
+  .assistant-message summary,
+  .assistant-citation span,
+  .assistant-citation small,
+  .assistant-error,
+  .assistant-composer small {
+    font-size: 12px;
+  }
+
+  .assistant-message > p,
+  .assistant-composer textarea {
+    font-size: 13px;
+    line-height: 1.5;
+  }
+}
+
+/* Compact stakeholder hierarchy. The canvas never scales below 100%, so all
+   rendered labels retain a 12px legibility floor and large maps pan instead. */
+.map-world {
+  min-width: 1680px;
+  padding: 58px 14px 28px;
+}
+
+.pod-hierarchy {
+  position: relative;
+  height: 126px;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+}
+
+.pod-head-card {
+  position: relative;
+  z-index: 4;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+}
+
+.pod-head-card > span {
+  color: #527086;
+  font-size: 12px !important;
+  font-weight: 800;
+  letter-spacing: .8px;
+  text-transform: uppercase;
+}
+
+.pod-head-card::after {
+  content: "";
+  position: absolute;
+  top: 82px;
+  left: 50%;
+  height: 20px;
+  border-left: 2px solid #7f96a8;
+}
+
+.pod-division-connectors {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 25px;
+  display: grid;
+  grid-template-columns: repeat(var(--division-count), minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pod-division-connectors::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: calc(50% / var(--division-count));
+  left: calc(50% / var(--division-count));
+  border-top: 2px solid #7f96a8;
+}
+
+.pod-division-connectors i {
+  justify-self: center;
+  width: 0;
+  height: 25px;
+  border-left: 2px solid #7f96a8;
+}
+
+.division-grid {
+  grid-template-columns: repeat(var(--division-count), var(--lane-width, 552px));
+  gap: 12px;
+}
+
+.division-lane {
+  padding: 0 8px 9px;
+  border-radius: 8px;
+}
+
+.division-heading {
+  min-height: 72px;
+  margin: 0 -8px 8px;
+  padding: 10px 12px;
+}
+
+.division-title,
+.unit-heading > span,
+.primary-eyebrow,
+.enterprise-title,
+.enterprise-grid h3,
+.enterprise-grid h3 small {
+  font-size: 12px !important;
+  line-height: 1.3;
+}
+
+.unit-heading {
+  grid-template-columns: 138px minmax(0, 1fr) 166px;
+  min-height: 40px;
+  padding: 0 10px;
+}
+
+.unit-heading strong {
+  overflow: hidden;
+  color: var(--lane-accent);
+  font-size: 13px !important;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.unit-content {
+  grid-template-columns: minmax(374px, 1fr) 166px;
+  min-height: 166px;
+}
+
+.business-org {
+  min-width: 374px;
+  padding: 14px 7px 12px;
+  overflow: visible;
+}
+
+.technology-primary {
+  min-width: 166px;
+  padding: 13px 9px;
+}
+
+.unit-org-forest {
+  flex-wrap: nowrap;
+  gap: 10px;
+  overflow: visible;
+}
+
+.org-tree {
+  display: flex;
+  justify-content: center;
+  width: max-content;
+  min-width: 100%;
+  overflow: visible;
+}
+
+.org-branch {
+  min-width: 172px;
+}
+
+.org-level {
+  gap: 2px;
+}
+
+.org-level > .org-branch {
+  padding: 15px 2px 0;
+}
+
+.stakeholder-node,
+.stakeholder-node.manager {
+  width: fit-content;
+  min-width: 134px;
+  max-width: 164px;
+  min-height: 72px;
+  padding: 3px 8px 5px;
+}
+
+.stakeholder-node.technology {
+  width: fit-content;
+  min-width: 144px;
+  max-width: 164px;
+  min-height: 86px;
+}
+
+.stakeholder-node.division-head {
+  width: fit-content;
+  min-width: 218px;
+  max-width: 286px;
+  min-height: 52px;
+  padding: 6px 10px;
+}
+
+.stakeholder-node.pod-head {
+  width: fit-content;
+  min-width: 280px;
+  max-width: 390px;
+  min-height: 62px;
+  padding: 7px 12px;
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+  border: 1px solid #245b7e;
+  border-radius: 7px;
+  background: linear-gradient(115deg, #0a304c, #14658f);
+  box-shadow: 0 5px 16px #12334a2c;
+  text-align: left;
+}
+
+.stakeholder-node.pod-head .node-avatar-wrap,
+.stakeholder-node.pod-head .node-avatar {
+  width: 40px;
+  height: 40px;
+  color: #124665;
+  background: #fff;
+}
+
+.stakeholder-node.pod-head .node-copy {
+  min-width: 0;
+  margin: 0;
+}
+
+.stakeholder-node.pod-head .node-copy strong,
+.stakeholder-node.pod-head .node-copy small {
+  color: #fff;
+}
+
+.node-avatar {
+  width: 34px;
+  height: 34px;
+  font-size: 12px !important;
+}
+
+.node-avatar-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+}
+
+.stakeholder-node.technology .node-avatar-wrap,
+.stakeholder-node.technology .node-avatar {
+  width: 39px;
+  height: 39px;
+}
+
+.stakeholder-node.division-head .node-avatar-wrap,
+.stakeholder-node.division-head .node-avatar {
+  width: 30px;
+  height: 30px;
+}
+
+.stakeholder-node.division-head .node-avatar-wrap {
+  margin-right: 20px;
+}
+
+.stakeholder-node.enterprise-lead .node-avatar-wrap {
+  margin-right: 20px;
+}
+
+.stakeholder-node.division-head .node-avatar,
+.stakeholder-node.enterprise-lead .node-avatar {
+  margin-right: 0;
+}
+
+.node-copy {
+  min-width: 0;
+  margin-top: 4px;
+  line-height: 1.22;
+}
+
+.node-copy strong,
+.node-copy small,
+.stakeholder-node.technology .node-copy strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 12px !important;
+  line-height: 1.22 !important;
+  text-overflow: ellipsis;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.node-copy small {
+  margin-top: 2px;
+  color: #6f8291;
+}
+
+.stakeholder-node sup {
+  top: -7px;
+  right: -9px;
+  left: auto;
+  min-width: 18px;
+  height: 18px;
+  font-size: 12px !important;
+}
+
+.country-flag {
+  top: auto !important;
+  right: -4px;
+  bottom: -2px;
+  left: auto !important;
+  width: 16px;
+  height: 11px;
+}
+
+.person-tooltip,
+.person-tooltip :is(span, strong, small, b) {
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+
+.person-tooltip {
+  width: 270px;
+}
+
+.overview-step-icons .step-icon {
+  transform: none;
+}
+
+.enterprise-functions {
+  margin-top: 14px;
+}
+
+.enterprise-grid article {
+  min-height: 176px;
+  padding: 12px 18px 16px;
+}
+
+@media (max-width: 900px) {
+  .map-world { min-width: var(--lane-width, 552px); }
+  .division-grid { grid-template-columns: var(--lane-width, 552px); }
+  .pod-hierarchy { width: var(--lane-width, 552px) !important; }
+  .pod-division-connectors { display: none; }
+  .pod-head-card::after { height: 33px; }
+  .stakeholder-node.pod-head { max-width: calc(100vw - 30px); }
+  .division-heading {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 8px;
+    min-height: 112px;
+  }
+  .division-title { justify-self: center; }
+  .unit-heading { grid-template-columns: minmax(0, 1fr) 166px; }
+  .unit-heading strong { text-align: center; }
+  .unit-heading > span:first-of-type { display: none; }
+  .res-overview-onboarding table { min-width: 700px; }
+}
+
+/* Keep pod detail drawers constrained to the viewport so lengthy meeting
+   intelligence has an always-available, independent scrollbar. */
+.pod-drawer-backdrop > .pod-detail {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  height: auto;
+  overflow-x: hidden;
+  overflow-y: scroll;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}

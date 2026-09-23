@@ -1,0 +1,414 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Account Intelligence dashboard on ECS Fargate. Requires an existing VPC, RDS PostgreSQL, ACM certificate, and trusted identity gateway.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedPattern: "[a-z0-9-]+"
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  PublicSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two public subnets for the internet-facing ALB.
+  PrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: At least two private subnets with NAT or VPC endpoint egress.
+  CertificateArn:
+    Type: String
+    Description: ACM certificate ARN for the public HTTPS hostname.
+  PublicOrigin:
+    Type: String
+    Description: Canonical HTTPS browser origin, for example https://dashboard.example.com.
+  DatabaseUrlSecretArn:
+    Type: String
+    Description: Secrets Manager ARN for a JSON secret with DATABASE_URL.
+  TrustedProxySecretArn:
+    Type: String
+    Description: Secrets Manager ARN for a JSON secret with TRUSTED_PROXY_SECRET.
+  ApiImageTag:
+    Type: String
+    Default: latest
+  WebImageTag:
+    Type: String
+    Default: latest
+  ApiDesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+  WebDesiredCount:
+    Type: Number
+    Default: 2
+    MinValue: 1
+
+Resources:
+  ApiRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ImageScanningConfiguration: { ScanOnPush: true }
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Keep the 30 most recent images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}}]}'
+
+  WebRepository:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      ImageScanningConfiguration: { ScanOnPush: true }
+      ImageTagMutability: IMMUTABLE
+      LifecyclePolicy:
+        LifecyclePolicyText: '{"rules":[{"rulePriority":1,"description":"Keep the 30 most recent images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":30},"action":{"type":"expire"}}]}'
+
+  LoadBalancerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTPS to the public dashboard endpoint.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          DestinationSecurityGroupId: !Ref ApplicationSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          DestinationSecurityGroupId: !Ref ApplicationSecurityGroup
+
+  ApplicationSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow only the ALB to reach Fargate tasks.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref LoadBalancerSecurityGroup
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+
+  FileSystemSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow NFS uploads only from API tasks.
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+          SourceSecurityGroupId: !Ref ApplicationSecurityGroup
+
+  UploadFileSystem:
+    Type: AWS::EFS::FileSystem
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Encrypted: true
+      BackupPolicy: { Status: ENABLED }
+      FileSystemTags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-uploads"
+
+  UploadMountTargetA:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref UploadFileSystem
+      SubnetId: !Select [0, !Ref PrivateSubnetIds]
+      SecurityGroups: [!Ref FileSystemSecurityGroup]
+
+  UploadMountTargetB:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref UploadFileSystem
+      SubnetId: !Select [1, !Ref PrivateSubnetIds]
+      SecurityGroups: [!Ref FileSystemSecurityGroup]
+
+  UploadAccessPoint:
+    Type: AWS::EFS::AccessPoint
+    Properties:
+      FileSystemId: !Ref UploadFileSystem
+      PosixUser: { Uid: "1000", Gid: "1000" }
+      RootDirectory:
+        CreationInfo:
+          OwnerUid: "1000"
+          OwnerGid: "1000"
+          Permissions: "0750"
+        Path: /uploads
+
+  Cluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub "${AWS::StackName}-cluster"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${AWS::StackName}/api"
+      RetentionInDays: 90
+
+  WebLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/ecs/${AWS::StackName}/web"
+      RetentionInDays: 90
+
+  TaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: ReadRuntimeSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: [!Ref DatabaseUrlSecretArn, !Ref TrustedProxySecretArn]
+
+  ApiTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ecs-tasks.amazonaws.com }
+            Action: sts:AssumeRole
+
+  PublicLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      Type: application
+      Subnets: !Ref PublicSubnetIds
+      SecurityGroups: [!Ref LoadBalancerSecurityGroup]
+
+  ApiTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      TargetType: ip
+      Protocol: HTTP
+      Port: 8000
+      HealthCheckPath: /api/health/ready
+      HealthCheckIntervalSeconds: 30
+      Matcher: { HttpCode: "200" }
+
+  WebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      VpcId: !Ref VpcId
+      TargetType: ip
+      Protocol: HTTP
+      Port: 8080
+      HealthCheckPath: /
+      Matcher: { HttpCode: "200" }
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref PublicLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref WebTargetGroup
+
+  ApiListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref HttpsListener
+      Priority: 10
+      Conditions:
+        - Field: path-pattern
+          Values: [/api/*]
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  ApiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ApiTaskRole.Arn
+      Volumes:
+        - Name: uploads
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref UploadFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              AccessPointId: !Ref UploadAccessPoint
+              IAM: DISABLED
+      ContainerDefinitions:
+        - Name: api
+          Image: !Sub "${ApiRepository.RepositoryUri}:${ApiImageTag}"
+          Essential: true
+          PortMappings: [{ ContainerPort: 8000 }]
+          MountPoints:
+            - SourceVolume: uploads
+              ContainerPath: /mnt/uploads
+              ReadOnly: false
+          Environment:
+            - { Name: APP_ENV, Value: production }
+            - { Name: STAKEHOLDER_REPOSITORY, Value: database }
+            - { Name: REQUIRE_DATABASE, Value: "true" }
+            - { Name: SEED_DEMO_DATA, Value: "false" }
+            - { Name: AUTO_CREATE_SCHEMA, Value: "false" }
+            - { Name: API_CORS_ORIGINS, Value: !Ref PublicOrigin }
+            - { Name: UPLOAD_ROOT, Value: /mnt/uploads }
+            - { Name: DOCUMENT_STORAGE_BACKEND, Value: filesystem }
+            - { Name: DOCUMENT_STORAGE_DURABLE, Value: "true" }
+            - { Name: AUTH_MODE, Value: trusted_proxy }
+          Secrets:
+            - Name: DATABASE_URL
+              ValueFrom: !Sub "${DatabaseUrlSecretArn}:DATABASE_URL::"
+            - Name: TRUSTED_PROXY_SECRET
+              ValueFrom: !Sub "${TrustedProxySecretArn}:TRUSTED_PROXY_SECRET::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: api
+
+  ApiMigrationTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "512"
+      Memory: "1024"
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt ApiTaskRole.Arn
+      Volumes:
+        - Name: uploads
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref UploadFileSystem
+            TransitEncryption: ENABLED
+            AuthorizationConfig: { AccessPointId: !Ref UploadAccessPoint, IAM: DISABLED }
+      ContainerDefinitions:
+        - Name: migrate
+          Image: !Sub "${ApiRepository.RepositoryUri}:${ApiImageTag}"
+          Essential: true
+          Command: [python, -m, alembic, upgrade, head]
+          MountPoints: [{ SourceVolume: uploads, ContainerPath: /mnt/uploads, ReadOnly: false }]
+          Environment:
+            - { Name: APP_ENV, Value: production }
+            - { Name: STAKEHOLDER_REPOSITORY, Value: database }
+            - { Name: REQUIRE_DATABASE, Value: "true" }
+            - { Name: SEED_DEMO_DATA, Value: "false" }
+            - { Name: AUTO_CREATE_SCHEMA, Value: "false" }
+            - { Name: API_CORS_ORIGINS, Value: !Ref PublicOrigin }
+            - { Name: UPLOAD_ROOT, Value: /mnt/uploads }
+            - { Name: DOCUMENT_STORAGE_DURABLE, Value: "true" }
+            - { Name: AUTH_MODE, Value: trusted_proxy }
+          Secrets:
+            - { Name: DATABASE_URL, ValueFrom: !Sub "${DatabaseUrlSecretArn}:DATABASE_URL::" }
+            - { Name: TRUSTED_PROXY_SECRET, ValueFrom: !Sub "${TrustedProxySecretArn}:TRUSTED_PROXY_SECRET::" }
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ApiLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: migrate
+
+  WebTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      RequiresCompatibilities: [FARGATE]
+      NetworkMode: awsvpc
+      Cpu: "256"
+      Memory: "512"
+      ExecutionRoleArn: !GetAtt TaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: web
+          Image: !Sub "${WebRepository.RepositoryUri}:${WebImageTag}"
+          Essential: true
+          PortMappings: [{ ContainerPort: 8080 }]
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref WebLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: web
+
+  ApiService:
+    Type: AWS::ECS::Service
+    DependsOn: [UploadMountTargetA, UploadMountTargetB, ApiListenerRule]
+    Properties:
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      DesiredCount: !Ref ApiDesiredCount
+      TaskDefinition: !Ref ApiTaskDefinition
+      HealthCheckGracePeriodSeconds: 60
+      DeploymentConfiguration: { MinimumHealthyPercent: 100, MaximumPercent: 200 }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups: [!Ref ApplicationSecurityGroup]
+      LoadBalancers:
+        - ContainerName: api
+          ContainerPort: 8000
+          TargetGroupArn: !Ref ApiTargetGroup
+
+  WebService:
+    Type: AWS::ECS::Service
+    DependsOn: HttpsListener
+    Properties:
+      Cluster: !Ref Cluster
+      LaunchType: FARGATE
+      DesiredCount: !Ref WebDesiredCount
+      TaskDefinition: !Ref WebTaskDefinition
+      HealthCheckGracePeriodSeconds: 30
+      DeploymentConfiguration: { MinimumHealthyPercent: 100, MaximumPercent: 200 }
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          Subnets: !Ref PrivateSubnetIds
+          SecurityGroups: [!Ref ApplicationSecurityGroup]
+      LoadBalancers:
+        - ContainerName: web
+          ContainerPort: 8080
+          TargetGroupArn: !Ref WebTargetGroup
+
+Outputs:
+  DashboardUrl:
+    Value: !Sub "https://${PublicLoadBalancer.DNSName}"
+  ApiRepositoryUri:
+    Value: !GetAtt ApiRepository.RepositoryUri
+  WebRepositoryUri:
+    Value: !GetAtt WebRepository.RepositoryUri
+  ClusterName:
+    Value: !Ref Cluster
+  MigrationTaskDefinitionArn:
+    Value: !Ref ApiMigrationTaskDefinition

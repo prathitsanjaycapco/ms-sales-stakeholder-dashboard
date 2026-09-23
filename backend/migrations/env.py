@@ -6,12 +6,12 @@ from alembic import context
 from sqlalchemy import MetaData, engine_from_config, inspect, pool, text
 from sqlalchemy.engine import make_url
 
-from backend.canonical_schema import metadata as canonical_metadata
-from backend.executive_store import executive_metadata
-from backend.pod_store import pod_metadata
-from backend.resourcing_store import resourcing_metadata
-from backend.config import settings
-from backend.schema_integrity import attach_postgresql_integrity
+from app.canonical_schema import metadata as canonical_metadata
+from app.executive_store import executive_metadata
+from app.pod_store import pod_metadata
+from app.resourcing_store import resourcing_metadata
+from app.config import settings
+from app.schema_integrity import attach_postgresql_integrity
 
 
 config = context.config

@@ -20,7 +20,7 @@ def upgrade() -> None:
     if "repository_snapshots" in table_names:
         canonical_count = connection.execute(sa.text("SELECT count(*) FROM stakeholders")).scalar_one()
         if canonical_count == 0:
-            raise RuntimeError("Legacy snapshot has not been imported. Run `python -m backend.manage import-legacy` before upgrading.")
+            raise RuntimeError("Legacy snapshot has not been imported. Run `python -m app.manage import-legacy` before upgrading.")
         op.drop_table("repository_snapshots")
     for table_name in ("pod_events", "pod_tasks", "pod_critical_items", "pod_milestones"):
         columns = {column["name"]: column for column in sa.inspect(connection).get_columns(table_name)}

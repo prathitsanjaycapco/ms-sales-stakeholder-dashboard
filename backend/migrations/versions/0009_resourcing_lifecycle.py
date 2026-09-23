@@ -5,7 +5,7 @@ Revises: 0007_weekly_executive_people
 """
 from alembic import op
 
-from backend.resourcing_store import (
+from app.resourcing_store import (
     candidate_interviews, candidate_offers, candidate_stage_history, candidates,
     onboarding_records, onboarding_steps, resource_requirements,
     resourcing_events, resourcing_seed_registry,

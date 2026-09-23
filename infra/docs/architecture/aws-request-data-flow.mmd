@@ -1,0 +1,44 @@
+%%{init: {"theme": "base", "flowchart": {"curve": "basis", "htmlLabels": true, "nodeSpacing": 34, "rankSpacing": 52}, "themeVariables": {"fontFamily": "Arial, sans-serif", "fontSize": "15px", "primaryTextColor": "#101828", "lineColor": "#344054", "clusterBkg": "#F8FAFC", "clusterBorder": "#667085"}}}%%
+flowchart LR
+    user["Account user"]
+    gateway["Corporate identity gateway<br/>authenticate; remove client identity headers;<br/>inject trusted identity and proxy secret"]
+    edge["AWS WAFv2 and ALB<br/>route / to web; /api/* to API"]
+    spa["React SPA<br/>served by Nginx"]
+
+    subgraph apiRuntime["FastAPI service on ECS/Fargate"]
+        direction TB
+        middleware["Middleware<br/>request ID; account and pod scope;<br/>role authorization; audit trigger"]
+        routes["REST routes<br/>validation; controlled errors;<br/>idempotency on supported commands"]
+        services["Domain services<br/>stakeholders; pods; executive;<br/>resourcing; reconciliation"]
+        middleware --> routes --> services
+    end
+
+    database[("RDS PostgreSQL<br/>canonical records; provenance;<br/>idempotency and audit events")]
+    storage[("EFS document storage<br/>private durable files")]
+    response["JSON response or<br/>controlled file download"]
+    scan["Required production change<br/>scan state: pending -> clean/quarantined"]
+
+    user -->|"HTTPS"| gateway
+    gateway --> edge
+    edge -->|"SPA assets"| spa
+    spa -->|"same-origin API request"| edge
+    edge --> middleware
+    services -->|"read"| database
+    services -->|"governed write plus audit"| database
+    services -->|"upload/download"| storage
+    services --> response --> user
+    storage -. "before downloadable" .-> scan
+    scan -. "persist scan result" .-> database
+
+    classDef actor fill:#FFF4E5,stroke:#B54708,color:#7A2E0E,stroke-width:2px;
+    classDef edge fill:#EAF2FF,stroke:#175CD3,color:#102A56,stroke-width:2px;
+    classDef app fill:#E8F7F0,stroke:#067647,color:#064E3B,stroke-width:2px;
+    classDef data fill:#F4EBFF,stroke:#7F56D9,color:#3E1C78,stroke-width:2px;
+    classDef caution fill:#FFF6E5,stroke:#DC6803,color:#7A2E0E,stroke-width:2px,stroke-dasharray: 5 5;
+
+    class user,response actor;
+    class gateway,edge edge;
+    class spa,middleware,routes,services app;
+    class database,storage data;
+    class scan caution;
+    style apiRuntime fill:#F8FAFC,stroke:#067647,stroke-width:2px
