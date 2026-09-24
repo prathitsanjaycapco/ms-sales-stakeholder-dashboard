@@ -25,7 +25,7 @@ export default function AccountWorkbookAdmin({ canAdmin }) {
     <div className="workbook-admin-grid">
       <div>
         <h3>1. Fill the template</h3>
-        {canAdmin && <a className="workbook-action" href={api.accountImportTemplateUrl} download="account-import-template.xlsx"><Download/>Download Excel template</a>}
+        {canAdmin && <a className="workbook-action" href={api.accountImportTemplateUrl} download="account-import-template-friendly.xlsx"><Download/>Download Excel template</a>}
         <label className="workbook-file">Completed .xlsx workbook<input type="file" accept=".xlsx" disabled={!canAdmin || busy} onChange={(event) => { setFile(event.target.files?.[0] || null); setPreview(null); setResult(null); }} /></label>
         <button type="button" disabled={!canAdmin || !file || busy} onClick={() => run(() => api.previewAccountWorkbook(file), setPreview)}>Preview workbook</button>
         {preview && <div className="workbook-preview"><b>{preview.account}</b><p>{Object.entries(preview.counts).map(([key, count]) => `${count} ${key.replaceAll("_", " ")}`).join(" · ")}</p><button type="button" disabled={busy} onClick={() => run(() => api.importAccountWorkbook(file), (value) => { setResult(`Imported account data. Backup: ${value.backup}`); setPreview(null); })}>Import these records</button></div>}

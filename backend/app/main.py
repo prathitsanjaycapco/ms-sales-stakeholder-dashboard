@@ -310,7 +310,7 @@ def account_excel_template(request: Request):
     return Response(
         content=template_bytes(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="account-import-template.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="account-import-template-friendly.xlsx"'},
     )
 
 
