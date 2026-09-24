@@ -25,15 +25,13 @@ Pod operating records and Executive analytics reference the same stakeholder, me
 ## Local development
 
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-Copy-Item .env.example .env
-python -m alembic upgrade head
-python -m uvicorn app.main:app --reload --port 8000
+py -3.13 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Development defaults to `app/stakeholder-dev.db` only when `DATABASE_URL` is absent. Startup never seeds business data. Run `python -m app.manage seed-demo` explicitly for a disposable nonproduction dataset; production configuration rejects that command.
+Run these commands from `backend`. Leave `backend/.env` absent for local SQLite; `.env.example` configures PostgreSQL and should not be copied for this setup. Development defaults to `app/stakeholder-dev.db` when `DATABASE_URL` is absent. Startup never seeds business data. Run `.\.venv\Scripts\python.exe -m app.manage seed-demo` only if you want a disposable sample dataset; skip it when importing your own Excel workbook. Production configuration rejects demo seeding.
 
 ### Excel account import (local SQLite)
 

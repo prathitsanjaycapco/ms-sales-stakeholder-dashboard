@@ -5,9 +5,8 @@ React and Vite single-page application for the executive, pod, stakeholder, and 
 ## Run locally
 
 ```powershell
-npm ci
-Copy-Item .env.example .env
-npm run dev
+npm.cmd ci
+npm.cmd run dev
 ```
 
 `VITE_API_URL` defaults to `/api`. For standalone development, Vite proxies that path to `http://127.0.0.1:8000`; set `VITE_PROXY_TARGET` to another API base URL when needed.
