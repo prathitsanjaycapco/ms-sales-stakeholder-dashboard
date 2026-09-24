@@ -44,6 +44,7 @@ class Settings:
     development_roles: tuple[str, ...]
     document_storage_backend: str
     document_storage_durable: bool
+    static_root: Path | None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -83,6 +84,7 @@ class Settings:
             development_roles=tuple(value.strip() for value in os.getenv("DEVELOPMENT_ROLES", "Account Admin").split(",") if value.strip()),
             document_storage_backend=document_storage_backend,
             document_storage_durable=document_storage_durable,
+            static_root=Path(os.environ["PORTABLE_STATIC_ROOT"]).resolve() if os.getenv("PORTABLE_STATIC_ROOT") else None,
         )
 
 

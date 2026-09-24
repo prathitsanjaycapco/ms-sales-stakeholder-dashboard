@@ -567,7 +567,7 @@ function LiveStakeholderDrawer({ selected, pod, editMode, canWrite, confirmChang
   return <aside className="stakeholder-drawer"><button className="drawer-close" onClick={onCollapse} aria-label="Collapse stakeholder drawer" title="Collapse stakeholder drawer"><PanelRightClose /></button><section className="drawer-profile"><div className="profile-avatar">{initials(person.name)}<sup>{selected.person.capcoContacts || 1}</sup></div><div><h2>{person.name}</h2>{(person.is_buyer ?? selected.person.buyer) && <span className="buyer-badge">Buyer / decision-maker</span>}<strong>{person.title}</strong><p>{person.division || selected.division || "Pod leadership"} · {person.business_unit || selected.unit || "Not applicable"}<br />{person.location || "Not recorded"}</p></div></section><div className="drawer-tags">{tags.slice(0, 4).map((tagName) => <span key={tagName}>{tagName}</span>)}</div>{editMode && canWrite && <div className="edit-mode-banner"><Pencil /> Map editing is on</div>}<nav className="drawer-tabs">{drawerTabs.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}>{item}</button>)}</nav>{notice && <div className="save-notice" role="status" aria-live="polite">{notice}</div>}{loading && !profile && <div className="api-state"><span className="loading-dot" /> Loading stakeholder intelligence...</div>}{error && !loading && <div className="api-state error-state" role="alert"><b>Backend profile unavailable</b><span>{error}</span><button onClick={loadProfile}>Retry</button></div>}{profile && <LiveDrawerSection tab={tab} profile={profile} candidates={candidates} editMode={editMode} canWrite={canWrite} confirmChanges={confirmChanges} onRefresh={loadProfile} onChanged={setNotice} onMapChanged={onMapChanged} />}</aside>;
 }
 
-function ControlRail({ pod, setPod, view, setView, filters, setFilters, data, filterOptions, onAdd, onCollapse, canWrite }) {
+function ControlRail({ pod, setPod, podOptions, view, setView, filters, setFilters, data, filterOptions, onAdd, onCollapse, canWrite }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const allRows = flattenPeople(data);
   const options = normalizeFilterOptions(filterOptions, allRows);
@@ -577,7 +577,7 @@ function ControlRail({ pod, setPod, view, setView, filters, setFilters, data, fi
   return (
     <aside className="control-rail">
       <button className="rail-collapse" onClick={onCollapse} aria-label="Collapse control rail" title="Collapse control rail"><PanelLeftClose /></button>
-      <section><label className="rail-label">Pod selection</label><select className="pod-select" value={pod} onChange={(event) => setPod(event.target.value)}><option>All</option><option>ISG</option><option>Wealth Management</option><option>MSIM</option></select></section>
+      <section><label className="rail-label">Pod selection</label><select className="pod-select" value={pod} onChange={(event) => setPod(event.target.value)}><option>All</option>{podOptions.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select></section>
       <section><label className="rail-label">Views</label>{viewItems.map(({ name, icon: Icon }) => <button key={name} className={`view-button ${view === name ? "active" : ""}`} onClick={() => setView(name)}><Icon /> {name}</button>)}</section>
       <section className="filter-section"><label className="rail-label"><Filter /> Filters</label>
         {selectFilter("Division", "division", ["All", ...options.divisions])}
@@ -620,9 +620,9 @@ function SecondaryView({ type, rows, total, onSelect, pod, coverageState, filter
   return <div className="secondary-view"><h2>Stakeholder directory</h2><p>{pod} · {countCopy}</p>{rows.length ? <div className="list-table"><div><b>Name</b><b>Division</b><b>Business unit</b><b>Team</b><b>Relationship</b></div>{[...rows].sort((a, b) => a.person.name.localeCompare(b.person.name)).map((row) => <button key={`${row.person.id}-${row.unit}`} onClick={() => onSelect(row.person, row)}><span>{row.person.name}<small>{row.person.title}</small></span><span>{row.division}</span><span>{row.unit}</span><span>{row.teamType}</span><span>{row.person.relationship}</span></button>)}</div> : <div className="secondary-empty"><List/>No stakeholders match the current search and filters.</div>}</div>;
 }
 
-function SettingsView({ preferences, onChange, onReset, session }) {
+function SettingsView({ preferences, onChange, onReset, session, podOptions }) {
   const [tab, setTab] = useState("Preferences");
-  return <div className="secondary-view settings-view"><div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections"><button className={tab === "Preferences" ? "active" : ""} onClick={() => setTab("Preferences")}>Preferences &amp; access</button><button className={tab === "Trust" ? "active" : ""} onClick={() => setTab("Trust")}>Trust &amp; operations</button></nav>{tab === "Trust" ? <OperationsCenter session={session} /> : <div className="settings-card"><div className="session-summary"><ShieldCheck/><span><b>{session?.subject || "Loading identity…"}</b><small>{session?.roles?.join(" · ") || "Resolving application roles"}</small></span><em>{session?.permissions?.write ? "Can edit" : "Read only"}</em></div><label><span>Default pod<small>Used when a shared URL does not specify a pod.</small></span><select value={preferences.defaultPod} onChange={(event) => onChange({ defaultPod: event.target.value })}><option>All</option><option>ISG</option><option>Wealth Management</option><option>MSIM</option></select></label><label><span>Compact hover details<small>Keep stakeholder tooltips dense on large maps.</small></span><input type="checkbox" checked={preferences.compactTooltips} onChange={(event) => onChange({ compactTooltips: event.target.checked })} /></label><label><span>Confirm organization changes<small>Confirm reporting-line and technology-owner changes before saving.</small></span><input type="checkbox" checked={preferences.confirmChanges} onChange={(event) => onChange({ confirmChanges: event.target.checked })} /></label><button onClick={onReset}><RotateCcw /> Reset map preferences</button></div>}</div></div>;
+  return <div className="secondary-view settings-view"><div className="settings-layout"><nav className="settings-tabs" aria-label="Settings sections"><button className={tab === "Preferences" ? "active" : ""} onClick={() => setTab("Preferences")}>Preferences &amp; access</button><button className={tab === "Trust" ? "active" : ""} onClick={() => setTab("Trust")}>Trust &amp; operations</button></nav>{tab === "Trust" ? <OperationsCenter session={session} /> : <div className="settings-card"><div className="session-summary"><ShieldCheck/><span><b>{session?.subject || "Loading identity…"}</b><small>{session?.roles?.join(" · ") || "Resolving application roles"}</small></span><em>{session?.permissions?.write ? "Can edit" : "Read only"}</em></div><label><span>Default pod<small>Used when a shared URL does not specify a pod.</small></span><select value={preferences.defaultPod} onChange={(event) => onChange({ defaultPod: event.target.value })}><option>All</option>{podOptions.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select></label><label><span>Compact hover details<small>Keep stakeholder tooltips dense on large maps.</small></span><input type="checkbox" checked={preferences.compactTooltips} onChange={(event) => onChange({ compactTooltips: event.target.checked })} /></label><label><span>Confirm organization changes<small>Confirm reporting-line and technology-owner changes before saving.</small></span><input type="checkbox" checked={preferences.confirmChanges} onChange={(event) => onChange({ confirmChanges: event.target.checked })} /></label><button onClick={onReset}><RotateCcw /> Reset map preferences</button></div>}</div></div>;
 }
 
 function AccountEntityDialog({ detail, onClose, onStakeholder, onEmployee, onEngagement, onMeeting, onOpportunity, onResourcing }) {
@@ -756,6 +756,7 @@ function App() {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [dataFocus, setDataFocus] = useState(() => route.meeting ? { type: "meeting", id: route.meeting } : route.opportunity ? { type: "opportunity", id: route.opportunity } : null);
   const [session, setSession] = useState(null);
+  const [applicationConfig, setApplicationConfig] = useState({ account: { name: "Morgan Stanley" }, pods: [] });
   const [accountDetail, setAccountDetail] = useState(null);
   const [accountDetailError, setAccountDetailError] = useState("");
   const mapPod = pod === "All" ? null : pod;
@@ -765,6 +766,8 @@ function App() {
   const [selected, setSelected] = useState(null);
   const [mapFocusRequest, setMapFocusRequest] = useState(null);
   const [pendingPodStakeholder, setPendingPodStakeholder] = useState(null);
+  const podOptions = applicationConfig.pods || [];
+  const accountName = applicationConfig.account?.name || "Account";
   useEffect(() => {
     if (!mobileNavOpen) {
       if (mobileNavWasOpen.current) mobileNavTriggerRef.current?.focus();
@@ -794,6 +797,13 @@ function App() {
     };
   }, [mobileNavOpen]);
   useEffect(() => { api.getSession().then(setSession).catch(() => setSession(null)); }, []);
+  useEffect(() => { api.getConfig().then(setApplicationConfig).catch(() => {}); }, []);
+  useEffect(() => {
+    if (!podOptions.length) return;
+    const valid = new Set(["All", ...podOptions.map((item) => item.name)]);
+    if (!valid.has(pod)) setPod("All");
+    if (!valid.has(preferences.defaultPod)) setPreferences((current) => saveWorkspacePreferences({ ...current, defaultPod: "All" }));
+  }, [podOptions, pod, preferences.defaultPod]);
   useEffect(() => {
     if (route.employee) api.getEmployeeProfile(route.employee).then(data => setAccountDetail({ type: "employee", data })).catch(() => setAccountDetailError("The linked employee profile could not be loaded."));
     else if (route.engagement) api.getEngagement(route.engagement).then(data => setAccountDetail({ type: "engagement", data })).catch(() => setAccountDetailError("The linked engagement could not be loaded."));
@@ -948,7 +958,7 @@ function App() {
     if (accountDetail?.type === "engagement") params.set("engagement", accountDetail.data.engagement.id); else params.delete("engagement");
     window.history.replaceState({}, "", `${window.location.pathname}?${params}${window.location.hash}`);
   }, [topSection, pod, selected?.person.id, filters.division, filters.unit, dataFocus?.type, dataFocus?.id, accountDetail]);
-  useEffect(() => { document.title = `${topSection} · Morgan Stanley Account Intelligence`; }, [topSection]);
+  useEffect(() => { document.title = `${topSection} · ${accountName} Account Intelligence`; }, [topSection, accountName]);
   const initialStakeholderHandled = useRef(false);
   useEffect(() => {
     if (initialStakeholderHandled.current || !route.stakeholder || mapState !== "ready") return;
@@ -960,14 +970,14 @@ function App() {
     <div className={`app-shell ${leftCollapsed || !showMapChrome ? "left-collapsed" : ""} ${rightCollapsed || !showMapChrome ? "right-collapsed" : ""} ${isFullWidth ? "pod-shell" : ""} ${showMapChrome ? "map-section" : ""} ${topSection === "Settings" ? "settings-section" : ""} ${preferences.compactTooltips ? "compact-tooltips" : "expanded-tooltips"}`}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <header className="top-navigation">
-        <div className="brand">Morgan Stanley</div>
+        <div className="brand">{accountName}</div>
         <button ref={mobileNavTriggerRef} className="mobile-nav-trigger" onClick={() => setMobileNavOpen((current) => !current)} aria-expanded={mobileNavOpen} aria-controls="primary-navigation" aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}><Menu /></button>
         <nav ref={mobileNavRef} id="primary-navigation" aria-label="Primary navigation" className={mobileNavOpen ? "open" : ""}>{topItems.map((item) => <button key={item} className={topSection === item ? "active" : ""} onClick={() => openTopSection(item)}>{item}</button>)}</nav>
-        <div className="global-actions"><label>Select pod:<select value={pod} onChange={(event) => setPod(event.target.value)}><option>All</option><option>ISG</option><option>Wealth Management</option><option>MSIM</option></select></label><button aria-label="Open account alerts" title="Account alerts" onClick={() => setNotificationsOpen(true)}><Bell /></button><button aria-label="Search account data" title="Search account data" onClick={() => setSearchOpen(true)}><Search /></button><span className="user-avatar" title={session?.roles?.join(", ")}>{session?.subject?.slice(0, 2).toUpperCase() || "…"}</span></div>
+        <div className="global-actions"><label>Select pod:<select value={pod} onChange={(event) => setPod(event.target.value)}><option>All</option>{podOptions.map((item) => <option key={item.id} value={item.name}>{item.name}</option>)}</select></label><button aria-label="Open account alerts" title="Account alerts" onClick={() => setNotificationsOpen(true)}><Bell /></button><button aria-label="Search account data" title="Search account data" onClick={() => setSearchOpen(true)}><Search /></button><span className="user-avatar" title={session?.roles?.join(", ")}>{session?.subject?.slice(0, 2).toUpperCase() || "…"}</span></div>
       </header>
       {mobileNavOpen && <button className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation" />}
       {showMapChrome && (!leftCollapsed || !rightCollapsed) && <button className="map-panel-backdrop" onClick={() => { setLeftCollapsed(true); setRightCollapsed(true); }} aria-label="Close map side panels" />}
-      {showMapChrome && <ControlRail pod={pod} setPod={setPod} view={view} setView={(nextView) => { setView(nextView); setTopSection("Stakeholder Map"); }} filters={filters} setFilters={setFilters} data={data} filterOptions={filterOptions} onAdd={() => setAddOpen(true)} onCollapse={() => setLeftCollapsed(true)} canWrite={!!session?.permissions?.write && !!mapPod} />}
+      {showMapChrome && <ControlRail pod={pod} setPod={setPod} podOptions={podOptions} view={view} setView={(nextView) => { setView(nextView); setTopSection("Stakeholder Map"); }} filters={filters} setFilters={setFilters} data={data} filterOptions={filterOptions} onAdd={() => setAddOpen(true)} onCollapse={() => setLeftCollapsed(true)} canWrite={!!session?.permissions?.write && !!mapPod} />}
       <main id="main-content" tabIndex="-1" className={`workspace ${isExecutiveView ? "executive-workspace" : ""} ${isResourcingView ? "resourcing-workspace" : ""}`}>
         {!isFullWidth && <section className="workspace-header"><div><span className="workspace-eyebrow">{workspaceEyebrow}</span><h1>{workspaceTitle}</h1><p>{workspaceSubtitle}</p></div><div className="workspace-actions">{showMapChrome && leftCollapsed && <button onClick={() => setLeftCollapsed(false)} aria-label="Open control rail"><PanelLeftOpen /> Filters</button>}{topSection === "Stakeholder Map" && session?.permissions?.write && <button onClick={() => setAddOpen(true)}><Plus /> Add person</button>}{topSection === "Stakeholder Map" && session?.permissions?.write && <button className={editMode ? "active" : ""} onClick={() => setEditMode(!editMode)}><Pencil /> {editMode ? "Finish editing" : "Edit map"}</button>}{topSection === "Stakeholder Map" && <label className="global-search"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search people or teams…" />{query && <button onClick={() => setQuery("")}><X /></button>}</label>}</div></section>}
         {isPodView ? (
@@ -977,7 +987,7 @@ function App() {
         ) : isManageData ? (
           <DataManagement pod={pod} initialSection={dataInitialSection} focus={dataFocus} canWrite={session?.permissions?.write} canAdmin={!!session?.roles?.includes("Account Admin")} />
         ) : topSection === "Settings" ? (
-          <SettingsView preferences={preferences} session={session} onChange={(changes) => setPreferences((current) => saveWorkspacePreferences({ ...current, ...changes }))} onReset={() => { setPreferences(resetWorkspacePreferences()); setFilters(DEFAULT_FILTERS); setView("Map View"); setTopSection("Stakeholder Map"); }} />
+          <SettingsView preferences={preferences} session={session} podOptions={podOptions} onChange={(changes) => setPreferences((current) => saveWorkspacePreferences({ ...current, ...changes }))} onReset={() => { setPreferences(resetWorkspacePreferences()); setFilters(DEFAULT_FILTERS); setView("Map View"); setTopSection("Stakeholder Map"); }} />
         ) : isExecutiveView ? (
           <ExecutiveView
             pod={pod}
@@ -990,7 +1000,7 @@ function App() {
             onOpenResourcing={(nextPod) => openResourcing(nextPod || pod)}
           />
         ) : mapState === "scope-required" ? (
-          <div className="map-data-state"><ShieldCheck/><h2>Select a pod to view the stakeholder map</h2><p>All-pod scope is intentionally not mapped to a hidden default. Choose ISG, Wealth Management, or MSIM.</p></div>
+          <div className="map-data-state"><ShieldCheck/><h2>Select a pod to view the stakeholder map</h2><p>All-pod scope is intentionally not mapped to a hidden default. Choose one of the imported pods.</p></div>
         ) : mapState === "loading" ? (
           <div className="map-data-state"><span className="map-skeleton"/><h2>Loading the canonical stakeholder map</h2><p>Resolving organization assignments and reporting lines…</p></div>
         ) : mapState === "error" ? (

@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.pool import StaticPool
@@ -57,7 +58,6 @@ from .models import (
 from .repository import (
     ConflictError,
     NotFoundError,
-    POD_STRUCTURE,
     slug,
 )
 from .persistence import create_repository
@@ -330,6 +330,7 @@ def data_trust(request: Request):
 
 @app.get("/api/pods")
 def pods():
+    structure = repository.organization_structure()
     return [
         {
             "id": pod,
@@ -339,14 +340,22 @@ def pods():
             "business_unit_count": sum(len(units) for units in divisions.values()),
             "stakeholder_count": len(repository.list_stakeholders(pod=pod)),
         }
-        for pod, divisions in POD_STRUCTURE.items()
+        for pod, divisions in structure.items()
     ]
+
+
+@app.get("/api/config")
+def application_config():
+    return {
+        "account": {"id": "morgan-stanley", "name": repository.account_name},
+        "pods": pods(),
+    }
 
 
 @app.get("/api/search")
 def global_search(request: Request, q: str = Query(min_length=2, max_length=120), pod: Optional[str] = None, limit: int = Query(default=8, ge=1, le=20)):
     """Grouped search over canonical people, organization, activity, and portfolio records."""
-    if pod and pod != "All" and pod not in POD_STRUCTURE:
+    if pod and pod != "All" and pod not in repository.pod_names():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pod not found")
     needle = q.strip().casefold()
     people = [item for item in repository.list_stakeholders(pod=None if pod == "All" else pod) if needle in f"{item.name} {item.title} {item.business_unit} {item.division}".casefold()][:limit]
@@ -1328,3 +1337,9 @@ def coverage(pod: str):
         return repository.coverage(pod)
     except Exception as error:
         raise translate_domain_error(error) from error
+
+
+if settings.static_root:
+    if not settings.static_root.joinpath("index.html").is_file():
+        raise RuntimeError(f"Portable frontend was not found at {settings.static_root}")
+    app.mount("/", StaticFiles(directory=settings.static_root, html=True), name="portable-frontend")

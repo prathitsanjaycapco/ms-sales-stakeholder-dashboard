@@ -44,6 +44,7 @@ function upload(path, file, metadata) {
 
 export const api = {
   getSession: () => request("/session"),
+  getConfig: () => request("/config"),
   getHealthDetails: () => request("/health/details"),
   getDataTrust: () => request("/data-trust"),
   getEmployees: (search) => request(`/employees${search ? `?search=${encodeURIComponent(search)}` : ""}`),

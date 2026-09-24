@@ -95,6 +95,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
                 return self._load_normalized(owned_connection)
         if not inspect(connection).has_table("accounts"):
             return False
+        account_rows = self._rows(connection, accounts)
         stakeholder_rows = self._rows(connection, stakeholders)
         if not stakeholder_rows:
             return False
@@ -116,6 +117,8 @@ class PersistentStakeholderRepository(StakeholderRepository):
         document_rows = self._rows(connection, documents)
         state_rows = self._rows(connection, application_state)
 
+        self.account_name = account_rows[0]["name"] if account_rows else "Morgan Stanley"
+        self.pod_order = [row["name"] for row in pod_rows]
         pod_names = {row["id"]: row["name"] for row in pod_rows}
         self.pod_heads = {row["name"]: row.get("head_stakeholder_id") for row in pod_rows if row.get("head_stakeholder_id")}
         division_by_id = {row["id"]: row for row in division_rows}
@@ -155,9 +158,14 @@ class PersistentStakeholderRepository(StakeholderRepository):
             if unit_id:
                 assignments_by_unit[unit_id].append(person)
 
+        enterprise_division_ids = {
+            unit_by_id[row["id"]]["division_id"]
+            for row in enterprise_rows
+            if row["id"] in unit_by_id
+        }
         self.divisions = {}
         for row in division_rows:
-            if row["name"] == "Enterprise Functions":
+            if row["id"] in enterprise_division_ids:
                 continue
             self.divisions[row["id"]] = {
                 "id": row["id"], "pod": pod_names[row["pod_id"]], "name": row["name"],
@@ -166,7 +174,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
         self.units = {}
         for row in sorted(unit_rows, key=lambda item: (item["division_id"], item["sort_order"])):
             division = division_by_id[row["division_id"]]
-            if division["name"] == "Enterprise Functions":
+            if division["id"] in enterprise_division_ids:
                 continue
             people = assignments_by_unit[row["id"]]
             business = sorted((p for p in people if p.team_type == "Business"), key=lambda p: (p.organizational_role != "Business Unit Head", p.id))
@@ -290,9 +298,10 @@ class PersistentStakeholderRepository(StakeholderRepository):
                 return self._normalized_rows(owned_connection)
         if inspect(connection).has_table("capco_employees"):
             available_employee_ids = set(connection.execute(text("SELECT id FROM capco_employees")).scalars())
-        known_pods = sorted({row["pod"] for row in self.divisions.values()} | set(self.enterprise) | set(self.pod_heads))
-        # Pod IDs are the account's governed codes (ISG, Wealth Management, MSIM).
-        # They are shared unchanged by operating and executive fact tables.
+        loaded_pods = {row["pod"] for row in self.divisions.values()} | set(self.enterprise) | set(self.pod_heads)
+        known_pods = [name for name in self.pod_names() if name in loaded_pods]
+        known_pods.extend(sorted(loaded_pods - set(known_pods)))
+        # Pod names remain stable IDs shared by operating and executive facts.
         pod_rows = [{"id": name, "account_id": ACCOUNT_ID, "name": name, "head_stakeholder_id": self.pod_heads.get(name)} for name in known_pods]
         division_rows = [{
             "id": row["id"], "pod_id": row["pod"], "name": row["name"], "color": row["color"],
@@ -404,7 +413,7 @@ class PersistentStakeholderRepository(StakeholderRepository):
                     "is_primary": True,
                 })
         return {
-            "accounts": [{"id": ACCOUNT_ID, "name": "Morgan Stanley"}], "pods": pod_rows,
+            "accounts": [{"id": ACCOUNT_ID, "name": self.account_name}], "pods": pod_rows,
             "divisions": division_rows, "business_units": unit_rows, "stakeholders": stakeholder_rows,
             "assignments": assignment_rows, "stakeholder_employee_relationships": stakeholder_employee_rows,
             "enterprise": enterprise_rows, "meetings": meeting_rows,

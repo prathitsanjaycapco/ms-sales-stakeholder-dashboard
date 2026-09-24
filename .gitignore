@@ -9,3 +9,5 @@ node_modules/
 .playwright/
 playwright-report/
 test-results/
+.portable-build-venv/
+artifacts/

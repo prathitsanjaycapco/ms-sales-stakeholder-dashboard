@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "account": {
+    "name": "Example Client"
+  },
+  "pods": [
+    {
+      "name": "Corporate Banking",
+      "head_stakeholder_id": "client-pod-head"
+    }
+  ],
+  "divisions": [
+    {
+      "id": "division-corporate",
+      "pod": "Corporate Banking",
+      "name": "Corporate Services",
+      "color": "#1675d1",
+      "head_stakeholder_id": "client-division-head"
+    }
+  ],
+  "business_units": [
+    {
+      "id": "unit-payments",
+      "division_id": "division-corporate",
+      "name": "Payments",
+      "sort_order": 0
+    }
+  ],
+  "employees": [
+    {
+      "id": "employee-001",
+      "name": "Alex Example",
+      "first_name": "Alex",
+      "last_name": "Example",
+      "title": "Client Partner",
+      "level": "Managing Principal",
+      "role": "Relationship Lead",
+      "capability": "Payments",
+      "location": "New York",
+      "active": true,
+      "manager_employee_id": null,
+      "skills": ["Payments", "Account Management"],
+      "source_record_id": "hr-001"
+    }
+  ],
+  "stakeholders": [
+    {
+      "id": "client-pod-head",
+      "name": "Taylor Executive",
+      "title": "Head of Corporate Banking",
+      "pod": "Corporate Banking",
+      "division_id": null,
+      "business_unit_id": null,
+      "team_type": "Business",
+      "organizational_role": "Pod Head",
+      "level": "Executive Leadership",
+      "location": "New York, USA",
+      "country_code": "US",
+      "manager_stakeholder_id": null,
+      "is_primary_technology": false,
+      "is_buyer": true,
+      "is_influencer": true,
+      "is_budget_holder": true,
+      "relationship_strength": "Strong",
+      "capco_contingents": 2,
+      "budget_amount": 5000000,
+      "biography": "Executive sponsor for the account.",
+      "tags": ["Executive"],
+      "source_record_id": "crm-001"
+    },
+    {
+      "id": "client-division-head",
+      "name": "Jordan Leader",
+      "title": "Head of Corporate Services",
+      "pod": "Corporate Banking",
+      "division_id": "division-corporate",
+      "business_unit_id": null,
+      "team_type": "Business",
+      "organizational_role": "Division Head",
+      "level": "Managing Director",
+      "location": "New York, USA",
+      "country_code": "US",
+      "manager_stakeholder_id": "client-pod-head",
+      "is_primary_technology": false,
+      "is_buyer": true,
+      "is_influencer": true,
+      "is_budget_holder": true,
+      "relationship_strength": "Strong",
+      "capco_contingents": 1,
+      "budget_amount": null,
+      "biography": "Division leader.",
+      "tags": ["Leadership"],
+      "source_record_id": "crm-002"
+    },
+    {
+      "id": "client-unit-head",
+      "name": "Morgan Buyer",
+      "title": "Head of Payments",
+      "pod": "Corporate Banking",
+      "division_id": "division-corporate",
+      "business_unit_id": "unit-payments",
+      "team_type": "Business",
+      "organizational_role": "Business Unit Head",
+      "level": "Managing Director",
+      "location": "New York, USA",
+      "country_code": "US",
+      "manager_stakeholder_id": "client-division-head",
+      "is_primary_technology": false,
+      "is_buyer": true,
+      "is_influencer": true,
+      "is_budget_holder": true,
+      "relationship_strength": "Medium",
+      "capco_contingents": 1,
+      "budget_amount": 2000000,
+      "biography": "Payments business owner.",
+      "tags": ["Payments"],
+      "source_record_id": "crm-003"
+    },
+    {
+      "id": "client-tech-lead",
+      "name": "Casey Technologist",
+      "title": "Payments Technology Lead",
+      "pod": "Corporate Banking",
+      "division_id": "division-corporate",
+      "business_unit_id": "unit-payments",
+      "team_type": "Technology",
+      "organizational_role": "Primary Technology Stakeholder",
+      "level": "Executive Director",
+      "location": "New York, USA",
+      "country_code": "US",
+      "manager_stakeholder_id": "client-unit-head",
+      "is_primary_technology": true,
+      "is_buyer": false,
+      "is_influencer": true,
+      "is_budget_holder": false,
+      "relationship_strength": "Developing",
+      "capco_contingents": 0,
+      "budget_amount": null,
+      "biography": "Technology relationship lead.",
+      "tags": ["Technology", "Payments"],
+      "source_record_id": "crm-004"
+    }
+  ],
+  "relationships": [
+    {
+      "id": "relationship-001",
+      "stakeholder_id": "client-unit-head",
+      "employee_id": "employee-001",
+      "relationship_role": "Relationship owner",
+      "is_primary": true,
+      "effective_from": "2026-01-01",
+      "effective_to": null,
+      "is_current": true
+    }
+  ]
+}

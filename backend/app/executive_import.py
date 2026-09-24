@@ -6,12 +6,11 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import insert, select, update
 
-from .canonical_schema import business_units, divisions, opportunities, stakeholders
+from .canonical_schema import business_units, divisions, opportunities, pods, stakeholders
 from .executive_store import (
     employee_capacity, employees, engagement_assignments, engagement_milestones,
     engagements, revenue_records,
 )
-from .repository import POD_STRUCTURE
 
 
 class ImportModel(BaseModel):
@@ -126,6 +125,7 @@ def import_executive_batch(engine, batch: ExecutiveImportBatch, *, dry_run: bool
     now = datetime.now(timezone.utc)
     with engine.begin() as connection:
         known_divisions = _ids(connection, divisions)
+        known_pods = _ids(connection, pods)
         known_units = _ids(connection, business_units)
         known_stakeholders = _ids(connection, stakeholders)
         known_opportunities = _ids(connection, opportunities)
@@ -133,7 +133,7 @@ def import_executive_batch(engine, batch: ExecutiveImportBatch, *, dry_run: bool
         known_engagements = _ids(connection, engagements) | {item.id for item in batch.engagements}
         errors = []
         for item in batch.engagements:
-            if item.pod_id not in POD_STRUCTURE: errors.append(f"{item.id}: unknown pod {item.pod_id}")
+            if item.pod_id not in known_pods: errors.append(f"{item.id}: unknown pod {item.pod_id}")
             if item.division_id not in known_divisions: errors.append(f"{item.id}: unknown division {item.division_id}")
             if item.business_unit_id not in known_units: errors.append(f"{item.id}: unknown business unit {item.business_unit_id}")
             if item.executive_sponsor_id and item.executive_sponsor_id not in known_stakeholders: errors.append(f"{item.id}: unknown sponsor {item.executive_sponsor_id}")
