@@ -43,7 +43,13 @@ function upload(path, file, metadata) {
 }
 
 export const api = {
+  accountImportTemplateUrl: `${API_BASE}/data-import/template`,
+  previewAccountWorkbook: (file) => request("/data-import/preview", { method: "POST", body: file, headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } }),
+  importAccountWorkbook: (file) => request("/data-import/apply", { method: "POST", body: file, headers: { "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" } }),
+  previewDemoClear: () => request("/data-import/demo-preview", { method: "POST" }),
+  clearDemoData: (token, phrase) => request("/data-import/clear-demo", { method: "POST", body: JSON.stringify({ token, phrase }) }),
   getSession: () => request("/session"),
+  getConfig: () => request("/config"),
   getHealthDetails: () => request("/health/details"),
   getDataTrust: () => request("/data-trust"),
   getEmployees: (search) => request(`/employees${search ? `?search=${encodeURIComponent(search)}` : ""}`),

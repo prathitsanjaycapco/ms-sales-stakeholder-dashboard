@@ -35,6 +35,14 @@ python -m uvicorn app.main:app --reload --port 8000
 
 Development defaults to `app/stakeholder-dev.db` only when `DATABASE_URL` is absent. Startup never seeds business data. Run `python -m app.manage seed-demo` explicitly for a disposable nonproduction dataset; production configuration rejects that command.
 
+### Excel account import (local SQLite)
+
+Open **Data administration → Excel import** as an Account Admin. Download the template, fill the seven data sheets, then select the completed `.xlsx` file. **Preview workbook** validates required fields, IDs, reporting lines, and relationships without writing. **Import these records** writes the account to an empty local SQLite database in one transaction. The same blank template is available at [`templates/account-import-template.xlsx`](templates/account-import-template.xlsx). The `Instructions` sheet explains IDs, Boolean fields, dates, and list columns.
+
+If the local database contains the generated sample data, choose **Review demo data** first. The API checks that core records have demo provenance and there are no recorded user changes or manually added notes/documents. It then shows row counts. To clear it, type `CLEAR DEMO DATA` and click **Confirm and clear demo data** within five minutes. The server saves a SQLite backup under `app/backups/` before deleting the demo dataset. The control is limited to development SQLite and Account Admin access. Import rejects any populated database, so it cannot silently replace existing records.
+
+After either operation, use **Reload dashboard** to refresh the visible pods and records. Do not run `seed-demo` after importing real data.
+
 The backend loads its repository-root `.env` itself; VS Code terminal environment injection is not required. `.env` is gitignored. URL-encode special characters in database passwords.
 
 ## Production configuration

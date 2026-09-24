@@ -57,7 +57,6 @@ from .models import (
 from .repository import (
     ConflictError,
     NotFoundError,
-    POD_STRUCTURE,
     slug,
 )
 from .persistence import create_repository
@@ -68,6 +67,8 @@ from .integrity import reconcile_account
 from .governance import READ_ROLES, execute_idempotent, principal_from_request, record_audit_event
 from .identity_service import IdentityService
 from .resourcing_store import ResourcingStore
+from .excel_import import parse_workbook, template_bytes
+from .account_import_service import clear_demo, import_account, preview_demo_clear
 
 
 repository = create_repository()
@@ -151,7 +152,7 @@ async def identity_permissions_and_audit(request: Request, call_next):
         if request.method not in {"GET", "HEAD", "OPTIONS"} and not principal.can_write:
             return JSONResponse(status_code=403, content={"detail": "This operation requires an Editor, Account Manager, or Account Admin role"})
         response = await call_next(request)
-        if request.method not in {"GET", "HEAD", "OPTIONS"} and response.status_code < 400:
+        if request.method not in {"GET", "HEAD", "OPTIONS"} and request.url.path not in {"/api/data-import/preview", "/api/data-import/demo-preview"} and response.status_code < 400:
             try:
                 audit_id = record_audit_event(pod_engine, principal, request, response.status_code)
                 response.headers["X-Audit-Event-ID"] = audit_id
@@ -281,6 +282,76 @@ def session(request: Request):
     return request.state.principal.as_dict()
 
 
+def _require_local_import_admin(request: Request) -> None:
+    if not request.state.principal.is_admin:
+        raise HTTPException(status_code=403, detail="Account Admin role required")
+    if settings.environment != "development" or pod_engine.dialect.name != "sqlite" or getattr(repository, "backend_name", "") != "normalized-sql":
+        raise HTTPException(status_code=403, detail="Account workbook administration is available only with a local development SQLite database")
+
+
+async def _workbook_from_request(request: Request):
+    limit = 5 * 1024 * 1024
+    if request.headers.get("content-length") and int(request.headers["content-length"]) > limit:
+        raise HTTPException(status_code=413, detail="Workbook exceeds the 5 MB limit")
+    content = bytearray()
+    async for chunk in request.stream():
+        content.extend(chunk)
+        if len(content) > limit:
+            raise HTTPException(status_code=413, detail="Workbook exceeds the 5 MB limit")
+    try:
+        return parse_workbook(bytes(content))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/data-import/template")
+def account_excel_template(request: Request):
+    _require_local_import_admin(request)
+    return Response(
+        content=template_bytes(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="account-import-template.xlsx"'},
+    )
+
+
+@app.post("/api/data-import/preview")
+async def preview_excel_import(request: Request):
+    _require_local_import_admin(request)
+    batch = await _workbook_from_request(request)
+    return {"account": batch.account.name, "counts": {
+        "pods": len(batch.pods), "divisions": len(batch.divisions), "business_units": len(batch.business_units),
+        "employees": len(batch.employees), "stakeholders": len(batch.stakeholders), "relationships": len(batch.relationships),
+    }}
+
+
+@app.post("/api/data-import/apply")
+async def apply_excel_import(request: Request):
+    _require_local_import_admin(request)
+    batch = await _workbook_from_request(request)
+    try:
+        return import_account(pod_engine, repository, batch)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/data-import/demo-preview")
+def preview_demo_data_clear(request: Request):
+    _require_local_import_admin(request)
+    try:
+        return preview_demo_clear(pod_engine, request.state.principal.subject)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/data-import/clear-demo")
+def clear_demo_data(request: Request, payload: dict):
+    _require_local_import_admin(request)
+    try:
+        return clear_demo(pod_engine, repository, request.state.principal.subject, payload.get("token", ""), payload.get("phrase", ""))
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.get("/api/employees")
 def list_employees(active: Optional[bool] = True, search: Optional[str] = None):
     return identity_service.list_employees(active, search)
@@ -292,8 +363,6 @@ def employee_profile(employee_id: str):
         return identity_service.employee_profile(employee_id)
     except Exception as error:
         raise translate_domain_error(error) from error
-
-
 @app.get("/api/engagements/{engagement_id}")
 def engagement_detail(engagement_id: str):
     try:
@@ -330,6 +399,7 @@ def data_trust(request: Request):
 
 @app.get("/api/pods")
 def pods():
+    structure = repository.organization_structure()
     return [
         {
             "id": pod,
@@ -339,14 +409,22 @@ def pods():
             "business_unit_count": sum(len(units) for units in divisions.values()),
             "stakeholder_count": len(repository.list_stakeholders(pod=pod)),
         }
-        for pod, divisions in POD_STRUCTURE.items()
+        for pod, divisions in structure.items()
     ]
+
+
+@app.get("/api/config")
+def application_config():
+    return {
+        "account": {"id": "morgan-stanley", "name": repository.account_name},
+        "pods": pods(),
+    }
 
 
 @app.get("/api/search")
 def global_search(request: Request, q: str = Query(min_length=2, max_length=120), pod: Optional[str] = None, limit: int = Query(default=8, ge=1, le=20)):
     """Grouped search over canonical people, organization, activity, and portfolio records."""
-    if pod and pod != "All" and pod not in POD_STRUCTURE:
+    if pod and pod != "All" and pod not in repository.pod_names():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pod not found")
     needle = q.strip().casefold()
     people = [item for item in repository.list_stakeholders(pod=None if pod == "All" else pod) if needle in f"{item.name} {item.title} {item.business_unit} {item.division}".casefold()][:limit]

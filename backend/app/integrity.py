@@ -12,7 +12,6 @@ from .canonical_schema import (
 )
 from .executive_store import employees, engagements, engagement_assignments, employee_capacity
 from .pod_store import pod_critical_items, pod_event_attendees, pod_events, pod_milestones, pod_tasks
-from .repository import POD_STRUCTURE
 
 
 def _money(value: float) -> float:
@@ -45,7 +44,7 @@ def reconcile_account(repository, pod_store, executive_store, anchor: date | Non
 
     add("Executive pipeline equals canonical active opportunities", _money(sum(canonical_by_pod.values())), _money(executive_pipeline), scope="account", evidence=[item.id for item in active])
     add("Executive weighted pipeline uses the canonical value × probability formula", _money(sum(canonical_weighted_by_pod.values())), _money(executive_weighted), scope="account", evidence=[item.id for item in active])
-    for pod_name in POD_STRUCTURE:
+    for pod_name in repository.pod_names():
         dashboard = pod_store.dashboard(pod_name, "week")
         add(f"{pod_name} Pod pipeline equals its canonical opportunities", _money(canonical_by_pod[pod_name]), _money(dashboard["summary"]["pipelineValue"]), scope=pod_name, evidence=[item["id"] for item in dashboard["opportunities"]])
         add(f"{pod_name} weighted pipeline reconciles", _money(canonical_weighted_by_pod[pod_name]), _money(dashboard["summary"]["weightedPipelineValue"]), scope=pod_name)
@@ -133,7 +132,7 @@ def reconcile_account(repository, pod_store, executive_store, anchor: date | Non
     add("Operating records use canonical employee IDs", 0, unlinked_operating_people, scope="database")
 
     hierarchy_issues = []
-    for pod_name in POD_STRUCTURE:
+    for pod_name in repository.pod_names():
         head_id = repository.pod_heads.get(pod_name)
         for person in repository.list_stakeholders(pod=pod_name):
             if person.id == head_id:

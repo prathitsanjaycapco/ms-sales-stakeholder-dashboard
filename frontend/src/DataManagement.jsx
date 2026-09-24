@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { api } from "./api";
 import SearchableSelect, { AdaptiveSelect } from "./SearchableSelect";
+import AccountWorkbookAdmin from "./AccountWorkbookAdmin";
 
 const documentTypes = ["Proposal", "Meeting Brief", "Account Plan", "Contract", "Delivery", "Research", "Other"];
 const opportunityStages = ["Discovery", "Qualification", "Proposal", "Negotiation", "Closed Won", "Closed Lost"];
@@ -178,10 +179,10 @@ export default function DataManagement({ pod, initialSection = "Critical items",
   };
 
   const tabs = [
-    ["Critical items", AlertTriangle], ["Meetings", CalendarDays], ["Commercial pipeline", BriefcaseBusiness], ["Documents", FileUp], ["Master data", Database],
+    ["Critical items", AlertTriangle], ["Meetings", CalendarDays], ["Commercial pipeline", BriefcaseBusiness], ["Documents", FileUp], ["Master data", Database], ["Excel import", FileUp],
   ];
 
-  if (!effectivePod && section !== "Master data") return <div className="data-management"><div className="map-data-state"><Database/><h2>Select a pod to administer account data</h2><p>Choose a pod to create operational records, or open the account-wide master data register.</p><button onClick={() => setSection("Master data")}>View master data</button></div></div>;
+  if (!effectivePod && section !== "Master data" && section !== "Excel import") return <div className="data-management"><div className="map-data-state"><Database/><h2>Select a pod to administer account data</h2><p>Choose a pod to create operational records, or open the account-wide master data register.</p><button onClick={() => setSection("Master data")}>View master data</button></div></div>;
 
   const masterRows = [
     ...people.map(item => ({ type: "Stakeholder", id: item.id, label: item.name, context: `${item.title || "Stakeholder"} / ${item.business_unit || item.division || effectivePod || "Account"}`, status: "ACTIVE", updated_at: item.updated_at })),
@@ -212,7 +213,7 @@ export default function DataManagement({ pod, initialSection = "Critical items",
 
   const guidanceEmpty = section === "Master data" || (section === "Critical items" ? criticalItems.length === 0 : section === "Meetings" ? meetings.length === 0 : section === "Commercial pipeline" ? podOpportunities.length === 0 : false);
   return <div className="data-management">
-    <header className="data-management-head"><div><span>{(effectivePod || "All pods").toUpperCase()} DATA ADMINISTRATION</span><h1>{section === "Master data" ? "Account master data" : "Manage account information"}</h1><p>{section === "Master data" ? "One searchable register for active and archived database records." : "Add operational records and documents to the same database used by Pod View and stakeholder profiles."}</p></div><div className="database-chip"><Database/><span><b>Canonical data pool</b><small>Changes appear throughout the account cockpit</small></span></div></header>
+    <header className="data-management-head"><div><span>{(effectivePod || "All pods").toUpperCase()} DATA ADMINISTRATION</span><h1>{section === "Master data" ? "Account master data" : section === "Excel import" ? "Excel account import" : "Manage account information"}</h1><p>{section === "Master data" ? "One searchable register for active and archived database records." : section === "Excel import" ? "Load a completed workbook into the local account database." : "Add operational records and documents to the same database used by Pod View and stakeholder profiles."}</p></div><div className="database-chip"><Database/><span><b>Canonical data pool</b><small>Changes appear throughout the account cockpit</small></span></div></header>
     {section === "Master data" ? <div className="data-summary master-summary"><RecordSummary icon={Database} title="Records" description="Visible in this scope" count={masterRows.length}/><RecordSummary icon={Archive} title="Archived" description="Recoverable records" count={masterData.deleted.length}/><RecordSummary icon={UsersRound} title="People" description="Stakeholders and employees" count={people.length + employees.length}/><RecordSummary icon={BriefcaseBusiness} title="Resourcing" description="Roles, candidates and onboarding" count={masterData.roles.length + masterData.candidates.length + masterData.onboarding.length}/></div> : <div className="data-summary">
       <RecordSummary icon={UsersRound} title="Stakeholders" description="Available linking records" count={people.length}/>
       <RecordSummary icon={CalendarDays} title="Meetings" description="Calendar and profile records" count={meetings.length}/>
@@ -220,7 +221,8 @@ export default function DataManagement({ pod, initialSection = "Critical items",
       <RecordSummary icon={AlertTriangle} title="Critical" description="Active Pod View items" count={criticalItems.length}/>
     </div>}
     <nav className="data-tabs">{tabs.map(([name, Icon]) => <button key={name} className={section === name ? "active" : ""} onClick={() => { setSection(name); setError(""); }}><Icon/>{name}</button>)}</nav>
-    <main className="data-management-body">
+    {section === "Excel import" && <AccountWorkbookAdmin canAdmin={canAdmin} />}
+    {section !== "Excel import" && <main className="data-management-body">
       <section className={`data-entry-card ${canWrite ? "" : "read-only"}`}>
         {!canWrite && <div className="data-error"><ShieldCheck/><span><b>Read-only access</b><small>Your current role can view these records but cannot change them.</small></span></div>}
         {section === "Master data" && <section className="master-register"><header><div><Database/><span><h2>Master record register</h2><p>Operational and archived records backed by the canonical account database.</p></span></div><small>{canAdmin ? "Account Admin controls enabled" : "Read-only master data"}</small></header><div className="master-tools"><label><Search/><input aria-label="Search master records" value={masterSearch} onChange={event => setMasterSearch(event.target.value)} placeholder="Search records or IDs…" /></label><select aria-label="Master record type" value={masterType} onChange={event => setMasterType(event.target.value)}>{masterTypes.map(value => <option key={value}>{value}</option>)}</select><select aria-label="Master record status" value={masterStatus} onChange={event => setMasterStatus(event.target.value)}><option>All</option><option>Active</option><option>Archived</option></select></div>{error && <div className="data-error" role="alert"><AlertTriangle/><span><b>Master data unavailable</b><small>{error}</small></span></div>}{masterLoading ? <div className="master-empty">Loading canonical records…</div> : <div className="master-table-wrap"><table><thead><tr><th>Type</th><th>Record</th><th>Context</th><th>Status</th><th>Record ID</th><th>Last changed</th><th>Action</th></tr></thead><tbody>{visibleMasterRows.map(item => <tr key={`${item.archived ? "archived" : "active"}-${item.type}-${item.id}`} className={item.archived ? "archived" : ""}><td>{item.type}</td><td><b>{item.label}</b>{item.archived && <small>{item.archive_reason}</small>}</td><td>{item.context || "—"}</td><td><span className={`master-status ${item.archived ? "archived" : ""}`}>{String(item.status || "Recorded").replaceAll("_", " ")}</span></td><td><code>{item.id}</code></td><td>{item.updated_at ? new Date(item.updated_at).toLocaleDateString() : "—"}</td><td>{item.archived ? <button disabled={!canAdmin || saving} onClick={() => restoreMasterRecord(item)}><RotateCcw/>Restore</button> : canAdmin && ["Critical item", "Meeting", "Opportunity"].includes(item.type) ? <button onClick={() => editMasterRecord(item)}>Edit</button> : <span>—</span>}</td></tr>)}</tbody></table>{!visibleMasterRows.length && <div className="master-empty">No records match these filters.</div>}</div>}</section>}
@@ -286,7 +288,7 @@ export default function DataManagement({ pod, initialSection = "Critical items",
         {section === "Commercial pipeline" && <><h3>Current pipeline</h3><div className="data-record-list editable-record-list">{podOpportunities.slice(0,8).map(item => <article key={item.id}><BriefcaseBusiness/><div><b>{item.name}</b><small>{item.stage} · {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(item.estimated_value)}</small></div><button onClick={() => chooseOpportunity(item.id)}>{canWrite ? "Edit" : "View"}</button></article>)}</div></>}
         {section === "Documents" && <><div className="document-policy"><h3>Document behavior</h3><ul><li>The uploaded file becomes the downloadable website copy.</li><li>The SharePoint URL and metadata can be edited later.</li><li>Removing a document deletes its local stored copy.</li><li>Files are served as downloads, not executed in the browser.</li></ul></div><h3>Documents for selected {document.target_type}</h3><div className="data-record-list editable-record-list">{targetDocuments.map(item => <article key={item.id}><FileUp/><div><b>{item.title}</b><small>{item.file_name || "Shared link only"}</small></div><button onClick={() => chooseDocument(item.id)}>{canWrite ? "Edit" : "View"}</button>{canWrite && <button className="remove-record" onClick={() => window.confirm("Remove this document and its stored file? This cannot be undone.") && submit(() => api.deleteDocument(item.id), "Document removed", async () => { if (editingDocumentId === item.id) chooseDocument(""); await loadTargetDocuments(); })}>Remove</button>}</article>)}</div></>}
       </aside>}
-    </main>
+    </main>}
     {notice && <div className="pod-toast" role="status" aria-live="polite"><Check/>{notice}</div>}
   </div>;
 }

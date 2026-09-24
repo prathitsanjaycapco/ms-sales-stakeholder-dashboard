@@ -160,6 +160,8 @@ class StakeholderRepository:
 
     def __init__(self, seed_data: bool = True) -> None:
         self._lock = RLock()
+        self.account_name = "Morgan Stanley"
+        self.pod_order: list[str] = []
         self.stakeholders: dict[str, Stakeholder] = {}
         self.pod_heads: dict[str, str] = {}
         self.units: dict[str, dict] = {}
@@ -176,6 +178,21 @@ class StakeholderRepository:
         self.dashboard_critical_statuses: dict[str, str] = {}
         if seed_data:
             self._seed()
+
+    def pod_names(self) -> list[str]:
+        """Return the persisted pod order, falling back to loaded stakeholder scope."""
+        if self.pod_order:
+            return list(self.pod_order)
+        return list(dict.fromkeys(item.pod for item in self.stakeholders.values()))
+
+    def organization_structure(self) -> dict[str, dict[str, list[str]]]:
+        structure: dict[str, dict[str, list[str]]] = {pod: {} for pod in self.pod_names()}
+        divisions = sorted(self.divisions.values(), key=lambda item: (self.pod_names().index(item["pod"]), item["name"]))
+        for division in divisions:
+            structure.setdefault(division["pod"], {})[division["name"]] = [
+                self.units[unit_id]["name"] for unit_id in division["unit_ids"]
+            ]
+        return structure
 
     def update_dashboard_task_status(self, pod: str, task_id: str, status: str) -> None:
         with self._lock:
@@ -208,6 +225,7 @@ class StakeholderRepository:
         global_unit_index = 0
 
         for pod_index, (pod, division_structure) in enumerate(POD_STRUCTURE.items()):
+            self.pod_order.append(pod)
             pod_head_name, pod_head_title = POD_HEADS[pod]
             pod_head = self._seed_person(
                 stakeholder_id=f"{slug(pod)}-pod-head",
@@ -586,13 +604,17 @@ class StakeholderRepository:
             self.documents[document.id] = document
 
     def _validate_org(self, pod: str, division: str, business_unit: str) -> str:
-        if pod not in POD_STRUCTURE:
+        structure = self.organization_structure()
+        if pod not in structure:
             raise NotFoundError(f"Unknown pod: {pod}")
-        if division not in POD_STRUCTURE[pod]:
+        if division not in structure[pod]:
             raise NotFoundError(f"Unknown division '{division}' for {pod}")
-        if business_unit not in POD_STRUCTURE[pod][division]:
+        if business_unit not in structure[pod][division]:
             raise NotFoundError(f"Unknown business unit '{business_unit}' for {division}")
-        return f"{slug(pod)}-{slug(division)}-{slug(business_unit)}"
+        unit = next((item for item in self.units.values() if item["pod"] == pod and item["division"] == division and item["name"] == business_unit), None)
+        if not unit:
+            raise NotFoundError(f"Business unit '{business_unit}' is not loaded")
+        return unit["id"]
 
     def get_stakeholder(self, stakeholder_id: str) -> Stakeholder:
         try:
@@ -651,13 +673,14 @@ class StakeholderRepository:
         return sorted(records, key=lambda item: (item.pod, item.division or "", item.business_unit or "", item.name))
 
     def build_map(self, pod: str, **filters) -> MapResponse:
-        if pod not in POD_STRUCTURE:
+        structure = self.organization_structure()
+        if pod not in structure:
             raise NotFoundError("Pod not found")
         selected = self.list_stakeholders(pod=pod, **filters)
         selected_ids = {item.id for item in selected}
         has_filters = any(value not in (None, "", "All") for value in filters.values())
         divisions = []
-        for division in sorted((item for item in self.divisions.values() if item["pod"] == pod), key=lambda item: list(POD_STRUCTURE[pod]).index(item["name"])):
+        for division in sorted((item for item in self.divisions.values() if item["pod"] == pod), key=lambda item: list(structure[pod]).index(item["name"])):
             units = []
             for unit_id in division["unit_ids"]:
                 unit = self.units[unit_id]
@@ -893,7 +916,7 @@ class StakeholderRepository:
 
     def set_pod_head(self, pod: str, stakeholder_id: str, reason: str) -> dict:
         with self._lock:
-            if pod not in POD_STRUCTURE:
+            if pod not in self.pod_names():
                 raise NotFoundError("Pod not found")
             stakeholder = self.get_stakeholder(stakeholder_id)
             if stakeholder.pod != pod:
@@ -1141,7 +1164,7 @@ class StakeholderRepository:
             return record
 
     def coverage(self, pod: str) -> dict:
-        if pod not in POD_STRUCTURE:
+        if pod not in self.pod_names():
             raise NotFoundError("Pod not found")
         divisions = []
         for division in (item for item in self.divisions.values() if item["pod"] == pod):
@@ -1164,11 +1187,12 @@ class StakeholderRepository:
         return {"pod": pod, "generated_at": self.now(), "divisions": divisions}
 
     def filter_options(self, pod: str) -> dict:
-        if pod not in POD_STRUCTURE:
+        structure = self.organization_structure()
+        if pod not in structure:
             raise NotFoundError("Pod not found")
         records = self.list_stakeholders(pod=pod)
         return {
-            "divisions": list(POD_STRUCTURE[pod]),
+            "divisions": list(structure[pod]),
             "business_units": sorted({
                 item.business_unit
                 for item in records

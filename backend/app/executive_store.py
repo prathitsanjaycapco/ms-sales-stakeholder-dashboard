@@ -537,7 +537,8 @@ class ExecutiveAnalyticsStore:
         return records
 
     def overview(self, period: str = "quarter", anchor: date | None = None, start_date: date | None = None, end_date: date | None = None, pod: str | None = None) -> dict:
-        if pod and pod != "All" and pod not in POD_STRUCTURE:
+        pod_names = self.repository.pod_names()
+        if pod and pod != "All" and pod not in pod_names:
             raise ValueError("Unknown pod")
         start, end = self.period_bounds(period, anchor, start_date, end_date)
         prior_start, prior_end = self._prior_bounds(start, end)
@@ -631,7 +632,7 @@ class ExecutiveAnalyticsStore:
             pipeline_by_segment[key] += row["value"]
             weighted_by_segment[key] += row["weightedValue"]
 
-        pod_dashboards = {pod_name: self.pod_store.dashboard(pod_name, "month", start.replace(day=1)) for pod_name in POD_STRUCTURE if not pod_filter or pod_name == pod_filter}
+        pod_dashboards = {pod_name: self.pod_store.dashboard(pod_name, "month", start.replace(day=1)) for pod_name in pod_names if not pod_filter or pod_name == pod_filter}
         relationship_by_segment = defaultdict(list)
         for pod_name, dashboard in pod_dashboards.items():
             people = {item["id"]: item for item in dashboard["people"]}
@@ -662,7 +663,8 @@ class ExecutiveAnalyticsStore:
 
         pod_views, segment_views = [], []
         segment_keys = sorted({(row["pod_id"], row["division"], row["business_unit"]) for row in project_rows})
-        for pod_name in sorted({row["pod_id"] for row in project_rows}, key=list(POD_STRUCTURE).index):
+        pod_position = {name: index for index, name in enumerate(pod_names)}
+        for pod_name in sorted({row["pod_id"] for row in project_rows}, key=lambda value: pod_position.get(value, len(pod_position))):
             rows = [row for row in project_views if row["pod"] == pod_name]
             pod_employee_ids = {value["employee_id"] for project in project_rows if project["pod_id"] == pod_name for value in assignments_by_project[project["id"]]}
             pod_capacity = sum(capacity_by_employee[value] for value in pod_employee_ids)
@@ -787,7 +789,8 @@ class ExecutiveAnalyticsStore:
 
     def weekly(self, week_start: date | None = None, pod: str | None = None, outlook_weeks: int = 4) -> dict:
         """Weekly operating view derived from canonical people and account records."""
-        if pod and pod != "All" and pod not in POD_STRUCTURE:
+        pod_names = self.repository.pod_names()
+        if pod and pod != "All" and pod not in pod_names:
             raise ValueError("Unknown pod")
         if outlook_weeks not in range(1, 9):
             raise ValueError("outlook_weeks must be between 1 and 8")
@@ -992,7 +995,7 @@ class ExecutiveAnalyticsStore:
                 "lastName": employee.get("last_name") or (name_parts[1] if len(name_parts) > 1 else ""),
                 "title": employee.get("title") or employee["role"], "level": employee["level"], "role": employee["role"],
                 "location": employee["location"], "capabilities": sorted(set(skills_by_employee[employee["id"]])),
-                "pods": sorted({value["pod"] for value in assignment_views}, key=list(POD_STRUCTURE).index),
+                "pods": sorted({value["pod"] for value in assignment_views}, key=lambda value: pod_names.index(value) if value in pod_names else len(pod_names)),
                 "assignments": assignment_views, "primaryProject": primary_assignment["engagement"] if primary_assignment else "Account investment",
                 "primaryEngagementId": primary_assignment["engagementId"] if primary_assignment else None,
                 "allocationPercent": sum(value["allocationPercent"] for value in assignment_views),
@@ -1097,7 +1100,7 @@ class ExecutiveAnalyticsStore:
             })
 
         pod_summaries = []
-        for pod_name in POD_STRUCTURE:
+        for pod_name in self.repository.pod_names():
             if pod_filter and pod_name != pod_filter:
                 continue
             pod_projects = [row for row in project_views if row["pod"] == pod_name]

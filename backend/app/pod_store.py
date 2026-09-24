@@ -306,7 +306,7 @@ class PodOperatingStore:
         self._reconcile_employee_identities()
 
     def _validate_pod(self, pod: str) -> None:
-        if pod not in POD_STRUCTURE and pod != "All":
+        if pod not in self.repository.pod_names() and pod != "All":
             raise NotFoundError("Pod not found")
 
     def _employee_names(self, employee_ids: list[str]) -> dict[str, str]:
@@ -1793,10 +1793,11 @@ class PodOperatingStore:
         if pod != "All":
             return self._finalize_dashboard(self._single_dashboard(pod, period, period_start), tag)
 
-        dashboards = [self._single_dashboard(value, period, period_start) for value in POD_STRUCTURE]
+        pod_names = self.repository.pod_names()
+        dashboards = [self._single_dashboard(value, period, period_start) for value in pod_names]
         collection_keys = ("people", "meetings", "upcomingPrep", "opportunities", "criticalItems", "tasks", "relationships", "milestones")
         combined = {key: [item for dashboard in dashboards for item in dashboard.get(key, [])] for key in collection_keys}
-        combined["focus"] = [f"{pod_name}: {priority}" for pod_name, dashboard in zip(POD_STRUCTURE, dashboards) for priority in dashboard.get("focus", [])]
+        combined["focus"] = [f"{pod_name}: {priority}" for pod_name, dashboard in zip(pod_names, dashboards) for priority in dashboard.get("focus", [])]
         combined["meetings"].sort(key=lambda item: item["start"])
         combined["upcomingPrep"].sort(key=lambda item: item["start"])
         combined["relationships"].sort(key=lambda item: (item.get("riskScore", 0), item.get("days", 0)), reverse=True)

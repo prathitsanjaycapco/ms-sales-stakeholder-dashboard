@@ -1,0 +1,17 @@
+.workbook-admin{margin:16px;padding:22px;border:1px solid #d9e5eb;border-radius:8px;background:#fff;color:#25465b}
+.workbook-admin>header{display:flex;gap:12px;align-items:flex-start;margin-bottom:18px}
+.workbook-admin>header>svg{width:25px;height:25px;color:#1775a6;flex:none}
+.workbook-admin h2{margin:0 0 5px;font-size:20px}.workbook-admin h3{margin:0 0 12px;font-size:15px}
+.workbook-admin p{margin:5px 0 13px;color:#607787;font-size:13px;line-height:1.5}
+.workbook-admin-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.workbook-admin-grid>div{padding:18px;border:1px solid #e0e9ee;border-radius:6px;background:#f8fafb}
+.workbook-admin button,.workbook-action{min-height:36px;padding:8px 12px;display:inline-flex;align-items:center;justify-content:center;gap:7px;border:1px solid #176f9f;border-radius:5px;background:#176f9f;color:#fff;font-size:12px;font-weight:700;cursor:pointer;text-decoration:none}
+.workbook-admin button:disabled{opacity:.5;cursor:not-allowed}.workbook-admin button svg,.workbook-action svg{width:15px;height:15px}
+.workbook-file,.workbook-preview label{display:grid;gap:6px;margin:14px 0;color:#38586a;font-size:12px;font-weight:700}
+.workbook-file input,.workbook-preview input{max-width:100%;padding:8px;border:1px solid #bacbd5;border-radius:5px;background:#fff;color:#294a5d}
+.workbook-preview{margin-top:15px;padding:14px;border:1px solid #bed8e7;border-radius:5px;background:#edf6fa}
+.workbook-preview p{overflow-wrap:anywhere}.workbook-preview.danger{border-color:#e1b8ac;background:#fff6f3}.workbook-preview.danger>svg{color:#b34d39}
+.workbook-preview.danger button{background:#a53f30;border-color:#a53f30}
+.workbook-result{display:flex;align-items:center;gap:10px;margin-top:16px;padding:12px;border-radius:5px;background:#eaf6ef;color:#29694a;font-size:12px;overflow-wrap:anywhere}
+.workbook-result svg{width:18px;height:18px;flex:none}.workbook-result button{margin-left:auto;flex:none}
+@media(max-width:800px){.workbook-admin-grid{grid-template-columns:1fr}.workbook-result{align-items:flex-start;flex-wrap:wrap}.workbook-result button{margin-left:28px}}
